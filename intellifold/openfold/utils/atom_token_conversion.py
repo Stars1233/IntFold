@@ -299,6 +299,40 @@ def mean_pool_with_lens(feats, feats_mask, lens, eps = 1e-6):
     return feats
     
 
+def mean_pool_with_lens_advanced(feats, feats_mask, lens, eps = 1e-6):
+
+    seq_len = feats.shape[1]
+    
+    assert (lens.sum(dim = -1) <= seq_len).all(), 'one of the lengths given exceeds the total sequence length of the features passed in'
+
+    cumsum_feats = feats.cumsum(dim = 1)
+    cumsum_feats = F.pad(cumsum_feats, (0, 0, 1, 0), value = 0.)
+
+    cumsum_valid = feats_mask.cumsum(dim=1)
+    cumsum_valid = F.pad(cumsum_valid, (1, 0), value = 0)
+
+    cumsum_indices = lens.cumsum(dim = 1)
+    cumsum_indices = F.pad(cumsum_indices, (1, 0), value = 0)
+
+    # sel_cumsum = einx.get_at('b [m] d, b n -> b n d', cumsum_feats, cumsum_indices)
+    # val_cumsum = einx.get_at('b [m], b n -> b n', cumsum_valid, cumsum_indices)
+    sel_cumsum = torch.gather(cumsum_feats, 1, cumsum_indices.unsqueeze(-1).expand(-1, -1, feats.shape[-1]))
+    val_cumsum = torch.gather(cumsum_valid, 1, cumsum_indices)
+
+    
+    # subtract cumsum at one index from the previous one
+    summed = sel_cumsum[:, 1:] - sel_cumsum[:, :-1]
+    summed_valid = val_cumsum[:, 1:] - val_cumsum[:, :-1]
+    
+    mask = summed_valid > 0
+    
+    # avg = einx.divide('b n d, b n', summed, summed_valid.clamp(min = 1))
+    # avg = einx.where('b n, b n d, -> b n d', mask, avg, 0.)
+    avg = summed / ( summed_valid.clamp(min=1).unsqueeze(-1) + eps)  # Perform the element-wise division with broadcasting
+    avg = torch.where(mask.unsqueeze(-1), avg, 0.)  # Apply the mask, setting invalid entries to 0
+    
+    return avg
+
 def pad_at_dim(
     t,
     pad: Tuple[int, int],

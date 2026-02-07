@@ -1299,23 +1299,27 @@ class MSABlock(nn.Module):
         pair_dropout: float,
         inf: float,
         eps: float,
+        is_last_block: bool = False,
     ):
         super(MSABlock, self).__init__()
+        self.is_last_block = is_last_block
 
-        self.msa_pair_weighted_averaging = MSAPairWeightedAveraging(    
-                    c_m=c_m,
-                    c_z=c_z,
-                    c_hidden=c_hidden_msa_att,
-                    no_heads=no_heads_msa,
-                    inf=inf,
-                )
+        if not self.is_last_block:
+            self.msa_pair_weighted_averaging = MSAPairWeightedAveraging(    
+                        c_m=c_m,
+                        c_z=c_z,
+                        c_hidden=c_hidden_msa_att,
+                        no_heads=no_heads_msa,
+                        inf=inf,
+                    )
             
         self.msa_dropout_layer = DropoutRowwise(msa_dropout)
 
-        self.msa_transition = Transition(
-            c_m,
-            transition_n=transition_n,
-        )
+        if not self.is_last_block:
+            self.msa_transition = Transition(
+                c_m,
+                transition_n=transition_n,
+            )
 
         self.outer_product_mean = OuterProductMean(
             c_m,
@@ -1399,18 +1403,20 @@ class MSABlock(nn.Module):
                                     chunk_size=chunk_size,
                                     inplace_safe=inplace_safe,)
 
-        m = add(m,
-            self.msa_dropout_layer(
-                self.msa_pair_weighted_averaging(
-                    m.clone() if torch.is_grad_enabled() else m, 
-                    z=z.clone() if torch.is_grad_enabled() else z, 
-                    mask=msa_mask, 
-                    chunk_size=_attn_chunk_size,
-                    use_deepspeed_evo_attention=use_deepspeed_evo_attention,
-                )
-            ),
-            inplace=inplace_safe,
-        )
+
+        if not self.is_last_block:
+            m = add(m,
+                self.msa_dropout_layer(
+                    self.msa_pair_weighted_averaging(
+                        m.clone() if torch.is_grad_enabled() else m, 
+                        z=z.clone() if torch.is_grad_enabled() else z, 
+                        mask=msa_mask, 
+                        chunk_size=_attn_chunk_size,
+                        use_deepspeed_evo_attention=use_deepspeed_evo_attention,
+                    )
+                ),
+                inplace=inplace_safe,
+            )
 
         if (not inplace_safe):
             input_tensors = [m, z]
@@ -1420,13 +1426,14 @@ class MSABlock(nn.Module):
         def fn(input_tensors):
             m, z = input_tensors
 
-            m = add(
-                m,
-                self.msa_transition(
-                    m, mask=msa_mask, chunk_size=chunk_size,
-                ),
-                inplace=inplace_safe,
-            )
+            if not self.is_last_block:
+                m = add(
+                    m,
+                    self.msa_transition(
+                        m, mask=msa_mask, chunk_size=chunk_size,
+                    ),
+                    inplace=inplace_safe,
+                )
 
             if (not inplace_safe):
                 input_tensors = [m, z]
@@ -1477,6 +1484,8 @@ class MSAModuleStack(nn.Module):
     ):
         super(MSAModuleStack, self).__init__()
  
+        self.skip_unused_modules = kwargs.get("skip_unused_modules", False)
+ 
         self.blocks = nn.ModuleList()
         for _ in range(no_blocks):
             block = MSABlock(
@@ -1493,6 +1502,7 @@ class MSAModuleStack(nn.Module):
                 pair_dropout=pair_dropout,
                 inf=inf,
                 eps=eps,
+                is_last_block = (_ == no_blocks - 1) and self.skip_unused_modules
             )
             self.blocks.append(block)
             

@@ -22,7 +22,14 @@ from intellifold.openfold.utils.tensor_utils import add, one_hot
 from intellifold.openfold.utils.chunk_utils import chunk_layer, ChunkSizeTuner
 from intellifold.openfold.model.primitives import Linear, LayerNorm
 from intellifold.openfold.model.pairformer import Transition, AttentionPairBias, AdaLN
-from intellifold.openfold.utils.atom_token_conversion import repeat_consecutive_with_lens, concat_previous_and_later_windows, pad_at_dim, mean_pool_with_lens
+from intellifold.openfold.utils.atom_token_conversion import (
+    repeat_consecutive_with_lens,
+    repeat_consecutive_with_lens_advanced,
+    concat_previous_and_later_windows, 
+    pad_at_dim, 
+    mean_pool_with_lens,
+    mean_pool_with_lens_advanced
+)
     
 class ConditionedTransitionBlock(nn.Module):
     """
@@ -111,12 +118,9 @@ class ConditionedTransitionBlock(nn.Module):
 class FourierEmbedding(nn.Module):
     def __init__(self, c):
         super().__init__()
-
-        weight = torch.randn(1, c)
-        bias = torch.randn(c)
         
-        self.register_buffer('weight', weight)
-        self.register_buffer('bias', bias)
+        self.weight = nn.Parameter(torch.randn(1, c), requires_grad=False)
+        self.bias = nn.Parameter(torch.randn(c), requires_grad=False)
 
     def forward(
         self,
@@ -341,7 +345,8 @@ class AtomToTokenPooler(nn.Module):
         self,
         q,
         atom_mask,
-        molecule_atom_lens
+        molecule_atom_lens,
+        advanced_conversion=False,
     ):
         """
         Args:
@@ -355,8 +360,12 @@ class AtomToTokenPooler(nn.Module):
             [*, N_token, C_token] token features
         """
         q = self.relu(self.linear_q(q))
-        q = q * atom_mask.unsqueeze(-1)
-        tokens = mean_pool_with_lens(q, atom_mask,molecule_atom_lens)
+        if not advanced_conversion:
+            q = q * atom_mask.unsqueeze(-1)
+            tokens = mean_pool_with_lens(q, atom_mask,molecule_atom_lens)
+        else:
+            q = q * atom_mask.unsqueeze(-1)
+            tokens = mean_pool_with_lens_advanced(q, atom_mask,molecule_atom_lens)
         return tokens
 
 
@@ -523,28 +532,42 @@ class DiffusionConditioning(nn.Module):
                 Maximum chain distance for relative position encoding
         """
         super().__init__()
+        self.advanced_conditioning = kwargs.get("advanced_conditioning", False)
+        
         self.relative_positions_encoding = RelativePositionEncoding(
             c_z = c_z,
             r_max=r_max,
             s_max=s_max,
-            mapping=False
-            )
-        self.no_bins = (
-            2 * r_max + 2 +
-            2 * r_max + 2 +
-            1 +
-            2 * s_max + 2
+            mapping=True if self.advanced_conditioning else False
         )
-        self.layer_norm_z = LayerNorm(c_z + self.no_bins, bias=False)
-        self.linear_z = Linear(c_z + self.no_bins, c_z, bias = False)
+    
+        if kwargs.get("advanced_conditioning", False) is True:
+            self.layer_norm_z = LayerNorm(c_z, bias=False)
+            self.layer_norm_z_relpos = LayerNorm(c_z, bias=False)
+            self.linear_z = Linear(c_z + c_z, c_z, bias = False)
+        else:
+            self.no_bins = (
+                2 * r_max + 2 +
+                2 * r_max + 2 +
+                1 +
+                2 * s_max + 2
+            )
+            self.layer_norm_z = LayerNorm(c_z + self.no_bins, bias=False)
+            self.linear_z = Linear(c_z + self.no_bins, c_z, bias = False)
         
         self.pair_transitions = nn.ModuleList([])
         for _ in range(no_transitions):
             transition = Transition(c= c_z, transition_n = transition_n)
             self.pair_transitions.append(transition)
-            
-        self.layer_norm_s = LayerNorm(c_s + c_s_inputs, bias=False)
-        self.linear_s = Linear(c_s + c_s_inputs, c_s,bias = False)
+        
+        if kwargs.get("advanced_conditioning", False) is True:
+            self.linear_s_inputs = Linear(c_s_inputs, c_s, bias = False)
+            self.layer_norm_s_inputs = LayerNorm(c_s, bias=False)
+            self.layer_norm_s = LayerNorm(c_s, bias=False)
+            self.linear_s = Linear(c_s + c_s, c_s,bias = False)
+        else:
+            self.layer_norm_s = LayerNorm(c_s + c_s_inputs, bias=False)
+            self.linear_s = Linear(c_s + c_s_inputs, c_s,bias = False)
         
         self.sigma_data = sigma_data
         self.fourier_embedding = FourierEmbedding(c_fourier)
@@ -595,9 +618,14 @@ class DiffusionConditioning(nn.Module):
                 whether to do in place operations
         """
         relative_position_encodings = self.relative_positions_encoding(asym_id, residue_index, entity_id, token_index, sym_id, dtype = z_trunk.dtype)
-        z = torch.cat((z_trunk, relative_position_encodings), dim = -1)
-        z = self.layer_norm_z(z)
-        z = self.linear_z(z)
+        if self.advanced_conditioning:
+            z = self.layer_norm_z(z_trunk)
+            z = torch.cat((z, self.layer_norm_z_relpos(relative_position_encodings)), dim = -1)
+            z = self.linear_z(z)
+        else:
+            z = torch.cat((z_trunk, relative_position_encodings), dim = -1)
+            z = self.layer_norm_z(z)
+            z = self.linear_z(z)
         
         for transition in self.pair_transitions:
             z = add(
@@ -605,10 +633,15 @@ class DiffusionConditioning(nn.Module):
                 transition(z),
                 inplace=inplace_safe,
             )
-            
-        s = torch.cat((s_trunk, s_inputs), dim = -1)
-        s = self.layer_norm_s(s)
-        s = self.linear_s(s)
+        
+        if self.advanced_conditioning:
+            s = self.layer_norm_s(s_trunk)
+            s = torch.cat((s, self.layer_norm_s_inputs(self.linear_s_inputs(s_inputs))), dim = -1)
+            s = self.linear_s(s)
+        else:
+            s = torch.cat((s_trunk, s_inputs), dim = -1)
+            s = self.layer_norm_s(s)
+            s = self.linear_s(s)
 
         n = self.fourier_embedding(0.25 * torch.log((t / self.sigma_data).clamp(min = self.eps)))
         n = self.layer_norm_f(n)
@@ -680,6 +713,7 @@ class AtomAttentionEncoder(nn.Module):
                 Whether this is the initial atom attention encoder in the input embedder
         """
         super().__init__()
+        self.advanced_conversion = kwargs.get("advanced_conversion", False)
         self.initial = initial
         self.linear_ref_pos = Linear(3,c_atom,bias = False)
         self.linear_ref_atom_name_chars = Linear(4 * 64,c_atom,bias = False)
@@ -813,7 +847,10 @@ class AtomAttentionEncoder(nn.Module):
             seq_len = s_trunk.shape[-2]
             # A5 Line 9
             c_trunk = self.linear_s(self.layer_norm_s(s_trunk))
-            c = add(c, repeat_consecutive_with_lens(c_trunk, molecule_atom_lens), inplace=inplace_safe)
+            if self.advanced_conversion:
+                c = add(c, repeat_consecutive_with_lens_advanced(c_trunk, molecule_atom_lens), inplace=inplace_safe)
+            else:
+                c = add(c, repeat_consecutive_with_lens(c_trunk, molecule_atom_lens), inplace=inplace_safe)
 
         # A5 Line 13
         p_cond_row = self.linear_c_row(self.relu(c)) # [b, l, c]
@@ -831,7 +868,10 @@ class AtomAttentionEncoder(nn.Module):
             p_trunk = self.linear_z(self.layer_norm_z(z))
             indices = torch.arange(seq_len, device = p_trunk.device)
             indices = einops.repeat(indices, 'n -> b n', b = batch_size)
-            indices = repeat_consecutive_with_lens(indices.unsqueeze(-1), molecule_atom_lens).squeeze(-1)
+            if self.advanced_conversion:
+                indices = repeat_consecutive_with_lens_advanced(indices.unsqueeze(-1), molecule_atom_lens).squeeze(-1)
+            else:
+                indices = repeat_consecutive_with_lens(indices.unsqueeze(-1), molecule_atom_lens).squeeze(-1)
             
             indices_row = pad_at_dim(indices, (0, padding_needed_row), value = 0, dim = -1)
             indices_col = pad_at_dim(indices, (0, padding_needed_row), value = 0, dim = -1)
@@ -874,12 +914,12 @@ class AtomAttentionEncoder(nn.Module):
         v = (ref_space_uid_row.unsqueeze(-1) == ref_space_uid_col.unsqueeze(-2)).to(d.dtype).unsqueeze(-1)
         
         # A5 Line 4
-        p = add(p, self.linear_d(d), inplace=inplace_safe)
+        p = add(p, self.linear_d(d) * v, inplace=inplace_safe)
         # A5 Line 5
-        p = add(p,self.linear_d_inv(d_inv),inplace=inplace_safe)
+        p = add(p,self.linear_d_inv(d_inv) * v,inplace=inplace_safe)
         # A5 Line 6
-        p = add(p,self.linear_v(v),inplace=inplace_safe)
-        p = v * p
+        p = add(p,self.linear_v(v) * v,inplace=inplace_safe)
+        # p = v * p
 
         # A5 Line 14
         p2 = self.linear_mlp_p_1(self.relu(p))
@@ -913,7 +953,8 @@ class AtomAttentionEncoder(nn.Module):
         a = self.pool_q(
             q = q,
             atom_mask = einops.repeat(atom_mask, 'b ... -> (b n) ...', n = q.shape[0] // atom_mask.shape[0]) if (q.shape[0] != atom_mask.shape[0]) else atom_mask,
-            molecule_atom_lens = einops.repeat(molecule_atom_lens, 'b ... -> (b n) ...', n = q.shape[0] // molecule_atom_lens.shape[0]) if (q.shape[0] != molecule_atom_lens.shape[0]) else molecule_atom_lens
+            molecule_atom_lens = einops.repeat(molecule_atom_lens, 'b ... -> (b n) ...', n = q.shape[0] // molecule_atom_lens.shape[0]) if (q.shape[0] != molecule_atom_lens.shape[0]) else molecule_atom_lens,
+            advanced_conversion = self.advanced_conversion
         )
         
         q_skip,c_skip,p_skip = q,c,p
@@ -958,6 +999,9 @@ class AtomAttentionDecoder(nn.Module):
                 Window size for local attention
         """
         super().__init__()
+        
+        self.advanced_conversion = kwargs.get("advanced_conversion", False)
+        
         # A6 Line 1
         self.linear_a = Linear(c_token, c_atom, bias=False)
         
@@ -1017,7 +1061,10 @@ class AtomAttentionDecoder(nn.Module):
         # ATOM ATTENTION DECODER, A20 Line 7
         # A6 Line 1
         a = self.linear_a(a)
-        a = repeat_consecutive_with_lens(a, molecule_atom_lens)
+        if not self.advanced_conversion:
+            a = repeat_consecutive_with_lens(a, molecule_atom_lens)
+        else:
+            a = repeat_consecutive_with_lens_advanced(a, molecule_atom_lens)
         q = a + q_skip
         q = q * atom_mask.unsqueeze(-1)
         # A6 Line 2

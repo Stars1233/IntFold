@@ -18,7 +18,7 @@ import einops
 from intellifold.openfold.model.backbone import BackboneTrunk
 from intellifold.openfold.model.diffusion import DiffusionModule
 from intellifold.openfold.model.heads import ConfidenceHead
-from intellifold.openfold.utils.atom_token_conversion import aggregate_fn
+from intellifold.openfold.utils.atom_token_conversion import aggregate_fn, aggregate_fn_advanced
 
 from torch.amp import autocast
 
@@ -47,6 +47,7 @@ class IntelliFold(nn.Module):
         self.confidence_head = ConfidenceHead(self.config)
         self.centre_random_augmentation = CentreRandomAugmentation()
         self.generator = generator
+        self.advanced_conversion = self.globals.advanced_conversion
 
     @autocast("cuda",enabled=True, dtype=torch.float32)
     def diffusion_edm_forward(self,x_noisy,t,input_features,s_inputs,s_trunk,z_trunk):
@@ -104,7 +105,10 @@ class IntelliFold(nn.Module):
         
         x = einops.repeat(x, 'b ... -> (b n) ...', n = diffusion_batch_size)
         pred_dense_atom_mask = input_features['pred_dense_atom_mask']
-        [aggregated_pred_dense_atom_mask], _ = aggregate_fn([pred_dense_atom_mask], pred_dense_atom_mask)
+        if self.advanced_conversion:
+            [aggregated_pred_dense_atom_mask], _ = aggregate_fn_advanced([pred_dense_atom_mask], pred_dense_atom_mask)
+        else:
+            [aggregated_pred_dense_atom_mask], _ = aggregate_fn([pred_dense_atom_mask], pred_dense_atom_mask)
         aggregated_pred_dense_atom_mask = einops.repeat(aggregated_pred_dense_atom_mask, 'b ... -> (b n) ...', n = diffusion_batch_size)
 
         for tau in range(1, T + 1):
@@ -156,14 +160,20 @@ class IntelliFold(nn.Module):
         
         # aggregate the ref_features
         aggregated_ref_keys = [key for key in input_features.keys() if 'ref_' in key]
-        aggregated_ref_features, reverse_fn = aggregate_fn([input_features[key] for key in aggregated_ref_keys], input_features['pred_dense_atom_mask'])
+        if self.advanced_conversion:
+            aggregated_ref_features, reverse_fn = aggregate_fn_advanced([input_features[key] for key in aggregated_ref_keys], input_features['pred_dense_atom_mask'])
+        else:
+            aggregated_ref_features, reverse_fn = aggregate_fn([input_features[key] for key in aggregated_ref_keys], input_features['pred_dense_atom_mask'])
 
         # update the input_features with the aggregated ref_features
         input_features.update(dict(zip(aggregated_ref_keys, aggregated_ref_features)))
         
         input_features['molecule_atom_lens'] = input_features['pred_dense_atom_mask'].sum(dim = -1)
         
-        aggregated_output, _ = aggregate_fn([input_features['pred_dense_atom_mask']], input_features['pred_dense_atom_mask'])
+        if self.advanced_conversion:
+            aggregated_output, _ = aggregate_fn_advanced([input_features['pred_dense_atom_mask']], input_features['pred_dense_atom_mask'])
+        else:
+            aggregated_output, _ = aggregate_fn([input_features['pred_dense_atom_mask']], input_features['pred_dense_atom_mask'])
         input_features['aggregated_pred_dense_atom_mask'] = aggregated_output[0].float() # use in the model
         
         # forward the backbone trunk

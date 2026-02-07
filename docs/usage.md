@@ -24,6 +24,8 @@ intellifold predict examples/examples_wo_msa/example_without_msa.yaml --out_dir 
 # only run the data processing step, and not run the model.
 intellifold predict ./examples/5S8I_A.yaml --out_dir ./output --only_run_data_process
 
+# choose the model version to run, the default is v2-flash, which is faster and more accurate than v1 and v2. you can choose the model based on your needs and computational resources.
+intellifold predict ./examples/5S8I_A.yaml --out_dir ./output --model v2
 ```
 
 ### Run with Bash Script
@@ -69,3 +71,5 @@ Common arguments of this `scripts`/`intellifold predict` are explained as follow
 * `--return_similar_seq` (`FLAG`, default: `False`)
   Whether to return sequences similar to those in the training PDB dataset during inference. You can use these similar sequences and its PDB ids to do further analysis, such as a reference structure.
   > Before using this option, please make sure the mmseqs2 tool is installed, you can install it by running `conda install -c conda-forge -c bioconda mmseqs2`
+* `--model` (`[v1, v2, v2-flash]`, default: `v2-flash`)  
+  The model to use for prediction. Options are 'v1', 'v2', and 'v2-flash'. 'v2-flash' is the default and recommended model, which is faster and more accurate than 'v1' and 'v2'. 'v1' is the original model used in the IntelliFold paper, and 'v2' is an improved version of the model with better performance but slower inference speed than 'v2-flash'. You can choose the model based on your needs and computational resources.

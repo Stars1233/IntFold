@@ -2,7 +2,7 @@ import re
 import copy
 import importlib
 import ml_collections as mlc
-
+import os
 
 def model_config(
     low_prec=False, 
@@ -19,12 +19,60 @@ def model_config(
 
     return c
 
+def get_model_config(args):
+    """
+    Returns the configuration for the IntelliFold model.
+    """
+    # Set the configuration parameters
+    # Note: The following parameters are set to their default values.
+    # You can modify them as per your requirements.
+    
+    is_low_precision = True
+    if os.environ.get("USE_DEEPSPEED_EVO_ATTENTION", False) == "true":
+        use_deepspeed_evoformer_attention = True
+        cutlass_path_env = os.getenv("CUTLASS_PATH", None)
+        msg = (
+                "if use ds4sci, set `CUTLASS_PATH` environment variable according to the instructions at https://www.deepspeed.ai/tutorials/ds4sci_evoformerattention/. \n"
+                "Or, you can refer the docs/kernels.md, you can set environment variable `CUTLASS_PATH` as follows: \n"
+                "git clone -b v3.5.1 https://github.com/NVIDIA/cutlass.git  /path/to/cutlass \n"
+                "export CUTLASS_PATH=/path/to/cutlass \n"
+            )
+        assert (
+            cutlass_path_env is not None and os.path.exists(cutlass_path_env)
+        ), msg
+    else:
+        use_deepspeed_evoformer_attention = False
+    
+    config = model_config(
+        low_prec=is_low_precision,
+        use_deepspeed_evoformer_attention=use_deepspeed_evoformer_attention,
+    )
+    config.sample.no_sample_steps_T = args.sampling_steps
+    config.backbone.recycling_iters = args.recycling_iters
 
-c_z = mlc.FieldReference(128, field_type=int)
-c_m = mlc.FieldReference(64, field_type=int)
-c_t = mlc.FieldReference(64, field_type=int)
+    # Enable v2 inference features
+    config.globals.advanced_conversion = True
+    config.diffusion.atom_attention_encoder.advanced_conversion = True
+    config.diffusion.atom_attention_decoder.advanced_conversion = True
+    config.backbone.input_embedder.advanced_conversion = True
+    config.backbone.msa.msa_stack.skip_unused_modules = True
+
+    return config
+
+
+c_z = mlc.FieldReference(512, field_type=int) # original 128
+no_heads_pair = mlc.FieldReference(8, field_type=int) # original 4
+c_m = mlc.FieldReference(256, field_type=int) # original 64
+no_heads_msa = mlc.FieldReference(8, field_type=int) # original 8
+c_t = mlc.FieldReference(256, field_type=int) # original 64
+no_heads_template = mlc.FieldReference(8, field_type=int) # original 4
+
 c_s = mlc.FieldReference(384, field_type=int)
+
+
 c_s_inputs = mlc.FieldReference(384 + 31 + 31 + 1, field_type=int)
+no_heads_atom = mlc.FieldReference(4, field_type=int)
+
 c_atom = mlc.FieldReference(128, field_type=int)
 c_atompair = mlc.FieldReference(16, field_type=int)
 c_token = mlc.FieldReference(768, field_type=int) # 384 in the input embedder
@@ -48,11 +96,15 @@ config = mlc.ConfigDict(
             # Use DeepSpeed memory-efficient attention kernel
             "use_deepspeed_evo_attention": False,
             "c_z": c_z,
+            "no_heads_pair": no_heads_pair,
             "c_m": c_m,
+            "no_heads_msa": no_heads_msa,
             "c_t": c_t,
+            "no_heads_template": no_heads_template,
             "c_s": c_s,
             "c_s_inputs": c_s_inputs,
             "c_atom": c_atom,
+            "no_heads_atom": no_heads_atom,
             "c_atompair": c_atompair,
             "c_token": c_token,
             "sigma_data": sigma_data,
@@ -71,10 +123,10 @@ config = mlc.ConfigDict(
                 "c_s_inputs": c_s_inputs,
                 "c_atom": c_atom,
                 "c_atompair": c_atompair,
-                "c_token": 384,
+                "c_token": c_s,
                 "c_ref": 3 + 1 + 128 + 1 + 4 * 64,
                 "no_blocks": 3,
-                "no_heads": 4,
+                "no_heads": no_heads_atom,
                 "window_size_row": 32,
                 "window_size_col": 128,
                 "r_max" :32,
@@ -96,9 +148,9 @@ config = mlc.ConfigDict(
                 "no_bins": 39,
                 "c_t": c_t,
                 "no_blocks": 2,
-                "c_hidden_mul": 64,
-                "c_hidden_pair_att": 16,
-                "no_heads_pair": 4,
+                "c_hidden_mul": c_t,
+                "c_hidden_pair_att": c_t // (no_heads_template),
+                "no_heads_pair": no_heads_template,
                 "transition_n": 2,
                 "pair_dropout": 0.25,
                 "tune_chunk_size": tune_chunk_size,
@@ -116,12 +168,12 @@ config = mlc.ConfigDict(
                 "msa_stack": {
                     "c_m": c_m,
                     "c_z": c_z,
-                    "c_hidden_msa_att": 8,
+                    "c_hidden_msa_att": c_m // no_heads_msa,
                     "c_hidden_opm": 32,
-                    "c_hidden_mul": 128,
-                    "c_hidden_pair_att": 32,
-                    "no_heads_msa": 8,
-                    "no_heads_pair": 4,
+                    "c_hidden_mul": c_z,
+                    "c_hidden_pair_att": c_z // no_heads_pair,
+                    "no_heads_msa": no_heads_msa,
+                    "no_heads_pair": no_heads_pair,
                     "no_blocks": 4,
                     "transition_n": 4,
                     "msa_dropout": 0.15,
@@ -135,10 +187,10 @@ config = mlc.ConfigDict(
             "pairformer_stack": {
                 "c_s": c_s,
                 "c_z": c_z,
-                "c_hidden_mul": 128,
-                "c_hidden_pair_att": 32,
+                "c_hidden_mul": c_z,
+                "c_hidden_pair_att": c_z // no_heads_pair,
                 "no_heads_single": 16,
-                "no_heads_pair": 4,
+                "no_heads_pair": no_heads_pair,
                 "no_blocks": 48,
                 "transition_n": 4,
                 "pair_dropout": 0.25,
@@ -230,10 +282,10 @@ config = mlc.ConfigDict(
             "pairformer_stack": {
                 "c_s": c_s,
                 "c_z": c_z,
-                "c_hidden_mul": 128,
-                "c_hidden_pair_att": 32,
+                "c_hidden_mul": c_z,
+                "c_hidden_pair_att": c_z // no_heads_pair,
                 "no_heads_single": 16,
-                "no_heads_pair": 4,
+                "no_heads_pair": no_heads_pair,
                 "no_blocks": 4,
                 "transition_n": 4,
                 "pair_dropout": 0.25,

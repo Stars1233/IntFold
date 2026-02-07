@@ -106,6 +106,7 @@ class InputEmbedder(nn.Module):
             inf=inf,
             eps=eps,
             tune_chunk_size = tune_chunk_size,
+            advanced_conversion = kwargs.get("advanced_conversion", False),
         )
             
 

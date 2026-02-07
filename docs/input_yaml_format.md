@@ -23,7 +23,7 @@ sequences:
 
 The `modifications` field is an optional field that allows you to specify modified residues in the polymer (`protein`, `dna` or`rna`). The `position` field specifies the index (starting from 1) of the residue, and `ccd` is the CCD code of the modified residue. This field is currently only supported for CCD ligands. 
 
-> **Note**: Although our model supports the template feature, this repository does not currently provide template support due to the design of the inference data pipeline (adapted from [Boltz-1](https://github.com/jwohlwend/boltz)).
+> **Note**: Although our model supports the template feature, this repository does not currently provide template support due to the design of the inference data pipeline (adapted from [Boltz-1](https://github.com/jwohlwend/boltz)). **As a result, predictions are generated without template inputs, which may lead to a slight drop in performance—especially for targets with strong available templates.**
 
 
 As an example:

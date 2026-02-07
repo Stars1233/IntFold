@@ -9,11 +9,25 @@
 
 <div align="center" style="margin: 20px 0;">
   <span style="margin: 0 10px;">⚡ <a href="https://server.intfold.com">IntelliFold Server</a></span>
-  &bull; <span style="margin: 0 10px;">📄 <a href="https://arxiv.org/abs/2507.02025">Technical Report</a></span>
+  &bull; <span style="margin: 0 10px;">📄 <a href="assets/Intellifold_v2_release_note.pdf">IntelliFold 2 Release Note</a></span> &bull; <span style="margin: 0 10px;">📄 <a href="https://arxiv.org/abs/2507.02025">IntelliFold Technical Report</a></span>
 </div>
 
 
 ![IntelliFold Model](assets/Intellifold-Model-Arc.png)
+
+## 🎉 New Model Release
+
+ - **2026-02-07**: We are excited to present [[IntelliFold 2]](assets/Intellifold_v2_release_note.pdf). This version represents a
+major architectural update and is one of the first open-source models to outperform AlphaFold3 on
+Foldbench.  
+
+
+## 📊 Benchmarking
+To comprehensively evaluate the performance of IntelliFold 2, we conducted a rigorous evaluation on [FoldBench](https://github.com/BEAM-Labs/FoldBench). We compared IntelliFold against several leading methods, including [Boltz-1,2](https://github.com/jwohlwend/boltz), [Chai-1](https://github.com/chaidiscovery/chai-lab), [Protenix](https://github.com/bytedance/Protenix) and [Alphafold3](https://github.com/google-deepmind/alphafold3).
+
+For more details on the benchmarking process and results, please refer to our release note [IntelliFold 2 Release Note](assets/Intellifold_v2_release_note.pdf) and [IntelliFold Technical Report](https://arxiv.org/abs/2507.02025).
+
+![Benchmark Metrics](assets/Intellifold_v2_performance.png)
 
 
 ## 🚀 Quick Start
@@ -40,19 +54,16 @@ To more complete installation instructions and usage, please refer to the [Insta
    intellifold predict your_input.yaml --out_dir ./results
    ```
 
+    IntelliFold v2-Flash will be used by default, you can also use IntelliFold v2 by specifying the model name:
+    ```bash
+    intellifold predict your_input.yaml --out_dir ./results --model v2
+    ```
+
 3. **Check Results**: Find predicted structures and confidence scores in the output directory, you can also check the section of **output format** in [output documentation](docs/input_yaml_format.md#output-format).
 
 4. **Optional Optimization**: Enable [custom kernels](docs/kernels.md) for faster inference and reduced memory usage
 
 For comprehensive usage instructions and examples, refer to the [Usage Guide](docs/usage.md).
-
-
-## 📊 Benchmarking
-To comprehensively evaluate the performance of IntelliFold, we conducted a rigorous evaluation on [FoldBench](https://github.com/BEAM-Labs/FoldBench). We compared IntelliFold against several leading methods, including [Boltz-1,2](https://github.com/jwohlwend/boltz), [Chai-1](https://github.com/chaidiscovery/chai-lab), [Protenix](https://github.com/bytedance/Protenix) and [Alphafold3](https://github.com/google-deepmind/alphafold3).
-
-For more details on the benchmarking process and results, please refer to our [Technical Report](https://arxiv.org/abs/2507.02025).
-
-![Benchmark Metrics](assets/intellifold_metrics.png)
 
 
 ## 🌐 IntelliFold Server
@@ -67,9 +78,18 @@ For more details on the benchmarking process and results, please refer to our [T
 If you use IntelliFold in your research, please cite our paper:
 
 ```
+@techreport{qiao2026intellifold,
+      title={{IntelliFold 2: Surpassing AlphaFold 3 via Architectural Refinement and Structural Consistency}},
+      author={Lifeng Qiao and He Yan and Gary Liu and Gaoxing Guo and Siqi Sun},
+      year={2026},
+      institution={IntelliGen-AI},
+      type={Release Note},
+      url={https://github.com/IntelliGen-AI/IntelliFold/assets/Intellifold_v2_release_note.pdf}
+}
+
 @misc{theintfoldteam2025intfoldcontrollablefoundationmodel,
       title={IntFold: A Controllable Foundation Model for General and Specialized Biomolecular Structure Prediction}, 
-      author={The IntFold Team and Leon Qiao and Wayne Bai and He Yan and Gary Liu and Nova Xi and Xiang Zhang},
+      author={The IntFold Team and Leon Qiao and Wayne Bai and He Yan and Gary Liu and Nova Xi and Xiang Zhang and Siqi Sun},
       year={2025},
       eprint={2507.02025},
       archivePrefix={arXiv},

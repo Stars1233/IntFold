@@ -19,6 +19,8 @@ from accelerate.utils import set_seed
 
 from intellifold.openfold.config import model_config
 from intellifold.openfold.inference_config import get_model_config
+from intellifold.openfold.v2_flash_inference_config import get_model_config as get_v2_flash_config
+from intellifold.openfold.v2_inference_config import get_model_config as get_v2_model_config
 from intellifold.openfold.model.model import IntelliFold
 from intellifold.openfold.utils.atom_token_conversion import aggregate_fn_advanced as aggregate_fn
 from intellifold.openfold.model.confidences import get_summary_confidence, get_full_confidence
@@ -245,9 +247,20 @@ def main(args):
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # CONFIGURE THE MODEL
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~    
-    config = get_model_config(args)
-    
+    if args.model == "v2-flash":
+        config = get_v2_flash_config(args)
+        checkpoint_path = cache / "intellifold_v2_flash.pt"
+    elif args.model == "v2":
+        config = get_v2_model_config(args)
+        checkpoint_path = cache / "intellifold_v2.pt"
+    elif args.model == "v1":
+        config = get_model_config(args)
+        checkpoint_path = cache / "intellifold_v0.1.0.pt"
+    else:
+        raise ValueError(f"Invalid model: {args.model}")   
+
     if accelerator.is_main_process:
+        logger.info(f"IntelliFold Model Version: {args.model}")
         logger.info(f'Number Of Diffusion Samples: {args.num_diffusion_samples}')
         logger.info(f"Number Of Sampling Steps: {args.sampling_steps}")
         logger.info(f"Number Of Recycling: {config.backbone.recycling_iters}")
@@ -261,7 +274,6 @@ def main(args):
     # INITIALIZE THE MODEL
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     model = IntelliFold(config,generator = generator)
-    checkpoint_path = cache / "intellifold_v0.1.0.pt"
     if not checkpoint_path.exists():
         logger.info(f"Checkpoint file {checkpoint_path} not found.")
         return
@@ -482,6 +494,12 @@ def intellifold_cli():
 #     is_flag=True,
 #     help="Whether to not use potentials for steering. Default is False.",
 # )
+@click.option(
+    "--model",
+    type=click.Choice(["v1", "v2", "v2-flash"]),
+    help="The model to use for prediction. Default is 'v2-flash'.",
+    default="v2-flash",
+)
 def predict(
     data: str,
     out_dir: str,
@@ -500,6 +518,7 @@ def predict(
     no_pairing: bool,
     only_run_data_process: bool,
     return_similar_seq: bool,
+    model: str,
     # no_potentials: bool,
 ):
     ## create a argparse.Namespace object
@@ -521,6 +540,7 @@ def predict(
         no_pairing=no_pairing,
         only_run_data_process=only_run_data_process,
         return_similar_seq=return_similar_seq,
+        model=model,
     )
     main(args=args)
 
