@@ -33,6 +33,9 @@ For more details on the benchmarking process and results, please refer to our re
 ## 🚀 Quick Start
 
 To quickly get started with IntelliFold, you can use the following commands:
+>**model**: Choose the model for inference via `--model`. Default: `v2-flash`. Supported: `v1`, `v2`, `v2-flash`.  
+>For differences between model versions, please refer to our **release note** [IntelliFold 2 Release Note](assets/Intellifold_v2_release_note.pdf)
+
 ```bash
 # Install intellifold from PyPI
 pip install intellifold
@@ -48,6 +51,7 @@ To more complete installation instructions and usage, please refer to the [Insta
 ## 🔍 Inference
 
 1. **Prepare Input File**: Create a YAML file with your sequences following our [input format specification](docs/input_yaml_format.md)
+      > **Note**: **Our model natively supports template inputs**, but this repo’s inference pipeline (adapted from Boltz-1) does not currently include template processing. Predictions therefore run **without templates**, which may slightly reduce performance.
 
 2. **Run Prediction**:
    ```bash
