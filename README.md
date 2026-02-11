@@ -39,8 +39,8 @@ To quickly get started with IntelliFold, you can use the following commands:
 ```bash
 # Install intellifold from PyPI
 pip install intellifold
-# Run inference with an example YAML file
-intellifold predict ./examples/5S8I_A.yaml --out_dir ./output
+# Run inference with an example YAML file, using the default model (v2-Flash)
+intellifold predict ./examples/5S8I_A.yaml --out_dir ./output --model v2-flash
 ```
 
 ## ⚙️ Installation
