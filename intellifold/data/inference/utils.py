@@ -44,7 +44,7 @@ V2_MODEL_URL = (
 )
 PROTEIN_PDB_SEQUENCES_URL = f"https://{HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/unique_protein_sequences.fasta"
 RNA_PDB_SEQUENCES_URL = f"https://{HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/unique_nucleic_acid_sequences.fasta"
-PROTEIN_PDB_GROUPS_URL = f"https://{HF_ENDPOINT}/intelligenAI/intintellifold/resolve/main/protein_id_groups.json"
+PROTEIN_PDB_GROUPS_URL = f"https://{HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/protein_id_groups.json"
 RNA_PDB_GROUPS_URL = f"https://{HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/nucleic_acid_id_groups.json"
 
 
