@@ -20,7 +20,7 @@
       ```
     - From local wheel:
       ```bash
-      pip install pypi/intellifold-2.0.0-py3-none-any.whl
+      pip install pypi/intellifold-2.0.2-py3-none-any.whl
       ```
     - Editable install:
       ```bash
