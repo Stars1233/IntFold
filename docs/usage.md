@@ -26,6 +26,12 @@ intellifold predict ./examples/5S8I_A.yaml --out_dir ./output --only_run_data_pr
 
 # choose the model version to run, the default is v2-flash, which is faster and more accurate than v1 and v2. you can choose the model based on your needs and computational resources.
 intellifold predict ./examples/5S8I_A.yaml --out_dir ./output --model v2
+
+# predict with use template online search
+intellifold predict ./examples/examples_wo_msa/example_without_msa.yaml --out_dir ./output --use_template --use_msa_server
+
+# predict with precompute protein msa and templates
+intellifold predict ./examples/5S8I_A_wtemplate.yaml --out_dir ./output --use_template
 ```
 
 ### Run with Bash Script
@@ -66,6 +72,8 @@ Common arguments of this `scripts`/`intellifold predict` are explained as follow
   Pairing strategy to use. Used only if `--use_msa_server` is set. Options are 'greedy' and 'complete'.
 * `--no_pairing` (`FLAG`, default: `False`)  
   Whether to use pairing for Protein Multimer MSA generation.
+* `--use_template` (`FLAG`, default: `False`)  
+  Whether to use template information for prediction. If set, the model will use the template features in the input YAML file (if provided) or search for templates online (if `--use_msa_server` is set).
 * `--only_run_data_process` (`FLAG`, default: `False`)  
   Whether to only run data processing, and not run the model.
 * `--return_similar_seq` (`FLAG`, default: `False`)
@@ -73,3 +81,25 @@ Common arguments of this `scripts`/`intellifold predict` are explained as follow
   > Before using this option, please make sure the mmseqs2 tool is installed, you can install it by running `conda install -c conda-forge -c bioconda mmseqs2`
 * `--model` (`[v1, v2, v2-flash]`, default: `v2-flash`)  
   The model to use for prediction. Options are 'v1', 'v2', and 'v2-flash'. 'v2-flash' is the default and recommended model, which is faster and more accurate than 'v1' and 'v2'. 'v1' is the original model used in the IntelliFold paper, and 'v2' is an improved version of the model with better performance but slower inference speed than 'v2-flash'. You can choose the model based on your needs and computational resources.
+
+
+### Tools for Generating the Template
+IntelliFold provides a script `run_templates_search.py` for searching templates. We recommend using an MSA generated against **UniRef (e.g., UniRef90/UniRef100)** as the input for template search for better coverage and more reliable hits. You can run the script as follows:
+```bash
+## example command for searching templates
+python runner/run_templates_search.py \
+--input_msa ./examples/msas/5s8i_A.a3m  \
+--output_template ./output/5s8i_A_hmmsearch.a3m \
+--seqres_database_path /path/to/pdb_seqres_2022_09_28.fasta
+```
+common arguments of `run_templates_search.py` are explained as follows:
+* `--input_msa` (`PATH`, required)  
+  Path of containing MSA a3m/csv file for template search.
+* `--output_template` (`PATH`, required)  
+  Path to save the hmmsearch a3m result, templates result.
+* `--hmmsearch_binary_path` (`PATH`, default: `None`)  
+  Path to hmmsearch binary. If not provided, will try to find it in the system PATH.
+* `--hmmbuild_binary_path` (`PATH`, default: `None`)  
+  Path to hmmbuild binary. If not provided, will try to find it in the system PATH.
+* `--seqres_database_path` (`PATH`, default: `None`)  
+  Path to sequence database. If not provided, will use the default `pdb_seqres_2022_09_28.fasta` database in the intellifold cache directory, if the database file is not found in the cache directory, it will be downloaded automatically, but you need to set the **INTELLIFOLD_CACHE** environment variable.

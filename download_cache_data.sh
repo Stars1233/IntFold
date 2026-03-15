@@ -16,7 +16,7 @@ if command -v aria2c &> /dev/null; then
     aria2c -c -x 10 -s 10 -k 1M -o cache_data/intellifold_v0.1.0.pt https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/intellifold_v0.1.0.pt
     aria2c -c -x 10 -s 10 -k 1M -o cache_data/intellifold_v2.pt https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/intellifold_v2.pt
     aria2c -c -x 10 -s 10 -k 1M -o cache_data/intellifold_v2_flash.pt https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/intellifold_v2_flash.pt
-    aria2c -c -x 10 -s 10 -k 1M -o cache_data/ccd.pkl https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/ccd.pkl
+    aria2c -c -x 10 -s 10 -k 1M -o cache_data/ccd_v2.pkl https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/ccd_v2.pkl
     aria2c -c -x 10 -s 10 -k 1M -o cache_data/unique_protein_sequences.fasta https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/unique_protein_sequences.fasta
     aria2c -c -x 10 -s 10 -k 1M -o cache_data/unique_nucleic_acid_sequences.fasta https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/unique_nucleic_acid_sequences.fasta
     aria2c -c -x 10 -s 10 -k 1M -o cache_data/protein_id_groups.json https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/protein_id_groups.json
@@ -26,7 +26,7 @@ else
     wget -P ./cache_data https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/intellifold_v0.1.0.pt
     wget -P ./cache_data https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/intellifold_v2.pt
     wget -P ./cache_data https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/intellifold_v2_flash.pt
-    wget -P ./cache_data https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/ccd.pkl
+    wget -P ./cache_data https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/ccd_v2.pkl
     wget -P ./cache_data https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/unique_protein_sequences.fasta
     wget -P ./cache_data https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/unique_nucleic_acid_sequences.fasta
     wget -P ./cache_data https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/protein_id_groups.json

@@ -1,0 +1,10 @@
+sequences:
+- protein:
+    id: A
+    msa: ./examples/msas/5s8i_A.a3m
+    template: ./examples/templates/5s8i_A_0_hmmsearch.a3m
+    sequence: SMSYDIQAWKKQCEELLNLIFQCEDSEPFRQPVDLLEYPDYRDIIDTPMDFATVRETLEAGNYESPMELCKDVRLIFSNSKAYTPSKRSRIYSMSLRLSAFFEEHISSVLSDYKSALRFHKRNTITKR
+- ligand:
+    ccd: 2LY
+    id: B
+version: 1

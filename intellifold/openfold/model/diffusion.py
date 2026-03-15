@@ -913,13 +913,24 @@ class AtomAttentionEncoder(nn.Module):
         
         v = (ref_space_uid_row.unsqueeze(-1) == ref_space_uid_col.unsqueeze(-2)).to(d.dtype).unsqueeze(-1)
         
-        # A5 Line 4
-        p = add(p, self.linear_d(d) * v, inplace=inplace_safe)
-        # A5 Line 5
-        p = add(p,self.linear_d_inv(d_inv) * v,inplace=inplace_safe)
-        # A5 Line 6
-        p = add(p,self.linear_v(v) * v,inplace=inplace_safe)
-        # p = v * p
+        ## for V2 model
+        if self.advanced_conversion:
+            # A5 Line 4
+            p = add(p, self.linear_d(d) * v, inplace=inplace_safe)
+            # A5 Line 5
+            p = add(p,self.linear_d_inv(d_inv) * v,inplace=inplace_safe)
+            # A5 Line 6
+            p = add(p,self.linear_v(v) * v,inplace=inplace_safe)
+            # p = v * p
+        ## for v1 model, keep the original formulation
+        else:
+            # A5 Line 4
+            p = add(p, self.linear_d(d), inplace=inplace_safe)
+            # A5 Line 5
+            p = add(p,self.linear_d_inv(d_inv),inplace=inplace_safe)
+            # A5 Line 6
+            p = add(p,self.linear_v(v),inplace=inplace_safe)
+            p = v * p
 
         # A5 Line 14
         p2 = self.linear_mlp_p_1(self.relu(p))

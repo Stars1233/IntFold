@@ -22,8 +22,11 @@
 from pathlib import Path
 from typing import Optional
 from collections.abc import Iterator, Mapping, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union, Final
 import itertools
 import bisect
+import os
+import shutil
 
 import numpy as np
 import torch
@@ -44,6 +47,25 @@ from intellifold.data.types import (
     ResidueConstraints,
     Structure,
 )
+from intellifold.data.const import (
+    DNA_CHAIN,
+    LIGAND_CHAIN_TYPES,
+    PROTEIN_CHAIN,
+    RNA_CHAIN,
+)
+from intellifold.data.template.template_parser import (
+    HmmsearchA3MParser,
+)
+from intellifold.data.template.template_utils import TemplateHitFeaturizer
+from intellifold.data.template.template_featurizer import (
+    map_to_standard,
+    TemplateFeatureAssemblyLine,
+)
+
+
+from intellifold.data.tools.logger import init_logging, get_logger
+logger = get_logger(__name__)
+init_logging()
 
 
 _BUCKETS = (
@@ -177,7 +199,120 @@ def construct_empty_template_features(
 
     return template_features
 
-def transform(boltz_input_features):
+
+def make_template_feature(
+    input_features: Dict[str, Tensor],
+    bioassembly: Sequence[Mapping[str, Any]],
+    use_template: bool = True,
+    online_template_featurizer: Optional[TemplateHitFeaturizer] = None,
+) -> Dict[str, np.ndarray]:
+    """
+    Generates template features during inference.
+
+    Args:
+        bioassembly: List of entity information from the input JSON.
+        use_template: Whether to use templates.
+        online_template_featurizer: Featurizer for processing template hits.
+
+    Returns:
+        Dictionary of template features.
+    """
+    asym_id = input_features['asym_id'] + 1
+    residue_index = input_features['residue_index'] + 1
+    template_meta_infos = {}
+    curr_asym_id = 1
+    
+    for eid, info in enumerate(bioassembly):
+        seq, count, ctype, t_path = "", 0, LIGAND_CHAIN_TYPES, ""
+        if "proteinChain" in info:
+            c = info["proteinChain"]
+            seq, count, ctype, t_path = (
+                c["sequence"],
+                c["count"],
+                PROTEIN_CHAIN,
+                c.get("templatesPath", ""),
+            )
+        elif "rnaSequence" in info:
+            c = info["rnaSequence"]
+            seq, count, ctype = c["sequence"], c["count"], RNA_CHAIN
+        elif "dnaSequence" in info:
+            c = info["dnaSequence"]
+            seq, count, ctype = c["sequence"], c["count"], DNA_CHAIN
+        elif "ligand" in info:
+            count, ctype = info["ligand"]["count"], LIGAND_CHAIN_TYPES
+            seq = "X" * (asym_id == curr_asym_id).sum()
+        
+        templates = []
+        if t_path and use_template and online_template_featurizer:
+            assert ctype == PROTEIN_CHAIN, "Only protein templates are supported."
+            with open(t_path, "r") as f:
+                content = f.read()
+
+            if t_path.endswith(".hhr"):
+                raise NotImplementedError("HHR parsing is not supported in this version.")
+            elif t_path.endswith(".a3m"):
+                hits = HmmsearchA3MParser.parse(
+                    query_seq=seq, a3m_str=content, skip_first=False
+                )
+            else:
+                raise ValueError(f"Unsupported template format: {t_path}")
+
+            result, _ = online_template_featurizer.get_templates(
+                sequence_uid=seq,
+                query_sequence=seq,
+                hits=hits,
+                max_template_date=None,
+            )
+            templates = result.features
+            logger.info(f"Found {len(templates)} templates for sequence {seq}")
+            
+        for i in range(count):
+            aid = curr_asym_id + i
+            template_meta_infos[aid] = {
+                "entity_id": eid,
+                "sequence": seq,
+                "chain_entity_type": ctype,
+                "templates": templates,
+            }
+        curr_asym_id += count
+
+    std_idxs = map_to_standard(asym_id, residue_index, template_meta_infos)  
+    template_features = (
+        TemplateFeatureAssemblyLine(max_templates=4)
+        .assemble(template_meta_infos, std_idxs)
+        .as_dict()
+    )
+    
+    ## convert to torch tensor
+    template_features = {k: torch.from_numpy(v) for k, v in template_features.items()}
+    
+    return template_features
+
+def construct_template_featurizer():
+    INTELLIFOLD_CACHE = os.environ["INTELLIFOLD_CACHE"]
+    prot_template_mmcif_dir = os.path.join(INTELLIFOLD_CACHE, "mmcif")
+    prot_template_cache_dir = ''
+    kalign_binary_path = shutil.which("kalign")
+    release_dates_path = os.path.join(INTELLIFOLD_CACHE, "common/release_date_cache.json")
+    obsolete_pdbs_path = os.path.join(INTELLIFOLD_CACHE, "common/obsolete_to_successor.json")
+    online_template_featurizer = TemplateHitFeaturizer(
+                mmcif_dir=prot_template_mmcif_dir,
+                template_cache_dir=prot_template_cache_dir,
+                max_hits=4,
+                kalign_binary_path=kalign_binary_path,
+                max_template_date="2021-09-30",
+                release_dates_path=release_dates_path,
+                obsolete_pdbs_path=obsolete_pdbs_path,
+                _shuffle_top_k_prefiltered=None,
+                _max_template_candidates_num=20,
+            )
+    
+    return online_template_featurizer
+
+
+def transform(
+    boltz_input_features,
+    ):
     """
     Transform the input features to the format required by the model.
     Parameters
@@ -408,28 +543,39 @@ def transform(boltz_input_features):
                         (0, padded_token_length - token_len), 
                         'constant', False)
     input_features['frame_mask'] = frame_mask
-
-
-    # ### empty template feature
-    # # 'template_aatype', 'template_distogram', 'template_pseudo_beta_mask', 'template_unit_vector', 'template_backbone_frame_mask'
-    # # template_aatype: [bs, n_templ, num_token, 31]
-    # template_aatype = torch.zeros((input_features['aatype'].shape[0], 4, input_features['aatype'].shape[1]))
-    # template_aatype = F.one_hot(template_aatype.long(),num_classes=31).float()
-    # # template_distogram: [bs, n_templ, num_token, num_token, 39]
-    # template_distogram = torch.zeros((input_features['aatype'].shape[0], 4, input_features['aatype'].shape[1], input_features['aatype'].shape[1], 39))
-    # # template_pseudo_beta_mask: [bs, n_templ, num_token]
-    # template_pseudo_beta_mask = torch.zeros((input_features['aatype'].shape[0], 4, input_features['aatype'].shape[1]))
-    # # template_unit_vector: [bs, n_templ, num_token, num_token, 3]
-    # template_unit_vector = torch.zeros((input_features['aatype'].shape[0], 4, input_features['aatype'].shape[1], input_features['aatype'].shape[1], 3))
-    # # template_backbone_frame_mask [bs, n_templ, num_token]
-    # template_backbone_frame_mask = torch.zeros((input_features['aatype'].shape[0], 4, input_features['aatype'].shape[1]))
-            
-    # input_features['template_aatype'] = template_aatype.float()
-    # input_features['template_distogram'] = template_distogram.float()
-    # input_features['template_pseudo_beta_mask'] = template_pseudo_beta_mask.float()
-    # input_features['template_unit_vector'] = template_unit_vector.float()
-    # input_features['template_backbone_frame_mask'] = template_backbone_frame_mask.float()
     
+    ### template feature
+    if 'template_aatype' in boltz_input_features:
+        template_keys = ['template_aatype', 'template_pseudo_beta_mask', 'template_distogram', 'template_unit_vector', 'template_backbone_frame_mask']
+        for key in template_keys:            
+            ## map value 31 to 0
+            if key == 'template_aatype':
+                template_aatype = boltz_input_features['template_aatype']
+                # is_protein==True & 31 -> 21, else map 31 -> 0
+                is_protein = input_features['is_protein'][input_features['seq_mask'] == 1]
+                is_protein_row = is_protein.unsqueeze(0)
+                is31 = (template_aatype == 31)
+                # protein type and 31 -> 21
+                template_aatype = torch.where(is_protein_row & is31,
+                              template_aatype.new_full((), 21).expand_as(template_aatype),
+                              template_aatype)
+                # non-protein type and 31 -> 0
+                template_aatype = torch.where((~is_protein_row) & is31,
+                              template_aatype.new_full((), 0).expand_as(template_aatype),
+                              template_aatype)
+                # template_aatype [n_templ, num_token]
+                input_features['template_aatype'] = template_aatype.unsqueeze(0)
+            else:
+                input_features[key] = boltz_input_features[key].unsqueeze(0)
+        
+        ## pad to the padded_token_length
+        input_features['template_aatype'] = F.pad(input_features['template_aatype'], (0, padded_token_length - input_features['template_aatype'].shape[2]), 'constant', 0)
+        #  [1, n_templ, n_token, n_token, 39], pdb to [1, n_templ, padded_token_length, padded_token_length, 39]
+        input_features["template_distogram"] = F.pad(input_features["template_distogram"], (0, 0, 0, padded_token_length - input_features["template_distogram"].shape[-2], 0, padded_token_length - input_features["template_distogram"].shape[-3]), value=0)
+        input_features['template_pseudo_beta_mask'] = F.pad(input_features['template_pseudo_beta_mask'], (0, padded_token_length - input_features['template_pseudo_beta_mask'].shape[2]), 'constant', 0)
+        input_features["template_unit_vector"] = F.pad(input_features["template_unit_vector"],(0, 0, 0, padded_token_length - input_features["template_unit_vector"].shape[-2], 0, padded_token_length - input_features["template_unit_vector"].shape[-3]),'constant', 0)
+        input_features['template_backbone_frame_mask'] = F.pad(input_features['template_backbone_frame_mask'], (0, padded_token_length - input_features['template_backbone_frame_mask'].shape[2]), 'constant', 0)
+
     input_features['record'] = boltz_input_features['record']
     input_features['structure'] = boltz_input_features['structure']
     
@@ -469,6 +615,10 @@ def collate(data: list[dict[str, Tensor]]) -> dict[str, Tensor]:
             collated[key] = values[0]
             continue
         
+        if 'template' in key:
+            collated[key] = values[0]
+            continue
+        
         if key not in [
             "all_coords",
             "all_resolved_mask",
@@ -478,7 +628,7 @@ def collate(data: list[dict[str, Tensor]]) -> dict[str, Tensor]:
             "ligand_symmetries",
             "record",
         ]:
-            # Check if all have the same sha哦跑；pe
+            # Check if all have the same shape
             shape = values[0].shape
             if not all(v.shape == shape for v in values):
                 values, _ = pad_to_max(values, 0)
@@ -491,6 +641,81 @@ def collate(data: list[dict[str, Tensor]]) -> dict[str, Tensor]:
     return collated
 
 
+def create_bioassembly_data(
+    record,
+    template_dir,
+    ):
+    """Create the bioassembly data for the given record.
+    Parameters    ----------
+    record : Record
+        The record to create the bioassembly data for.
+    template_dir : Path
+        The path to the template directory.
+    Returns
+    -------
+    List[Dict]
+        The created bioassembly data.
+    """
+    chains = record.chains
+    bioassembly_data = []
+    entity_id_2_data = {}
+    for chain in chains:
+        mol_type = chain.mol_type
+        sequence = chain.sequence
+        entity_id = chain.entity_id
+        template_id = chain.template_id
+        if mol_type == 0:  # protein
+            if entity_id in entity_id_2_data:
+                assert 'proteinChain' in entity_id_2_data[entity_id]
+                entity_id_2_data[entity_id]['proteinChain']['count'] += 1
+            else:
+                entity_id_2_data[entity_id] = {
+                    'proteinChain': {
+                        'count': 1,
+                        'sequence': sequence,
+                        'templatesPath': f'{template_dir}/{template_id}_hmmsearch.a3m',
+                    }
+                }
+        elif mol_type == 1:  # DNA
+            if entity_id in entity_id_2_data:
+                assert 'dnaSequence' in entity_id_2_data[entity_id]
+                entity_id_2_data[entity_id]['dnaSequence']['count'] += 1
+            else:
+                entity_id_2_data[entity_id] = {
+                    'dnaSequence': {
+                        'count': 1,
+                        'sequence': sequence,
+                    }
+                }
+        elif mol_type == 2:  # RNA
+            if entity_id in entity_id_2_data:
+                assert 'rnaSequence' in entity_id_2_data[entity_id]
+                entity_id_2_data[entity_id]['rnaSequence']['count'] += 1
+            else:
+                entity_id_2_data[entity_id] = {
+                    'rnaSequence': {
+                        'count': 1,
+                        'sequence': sequence,
+                    }
+                }
+        elif mol_type == 3:  # ligand
+            if entity_id in entity_id_2_data:
+                assert 'ligand' in entity_id_2_data[entity_id]
+                entity_id_2_data[entity_id]['ligand']['count'] += 1
+            else:
+                entity_id_2_data[entity_id] = {
+                    'ligand': {
+                        'ligand': sequence,
+                        'count': 1,
+                    }
+                }
+          
+    for entity_id in range(len(entity_id_2_data)):
+        bioassembly_data.append(entity_id_2_data[entity_id])
+    
+    return bioassembly_data
+
+    
 class PredictionDataset(torch.utils.data.Dataset):
     """Base iterable dataset."""
 
@@ -499,6 +724,8 @@ class PredictionDataset(torch.utils.data.Dataset):
         manifest: Manifest,
         target_dir: Path,
         msa_dir: Path,
+        template_dir: Optional[Path] = None,
+        use_template: bool = False,
         constraints_dir: Optional[Path] = None,
     ) -> None:
         """Initialize the training dataset.
@@ -517,6 +744,8 @@ class PredictionDataset(torch.utils.data.Dataset):
         self.manifest = manifest
         self.target_dir = target_dir
         self.msa_dir = msa_dir
+        self.template_dir = template_dir
+        self.use_template = use_template
         self.constraints_dir = constraints_dir
         self.tokenizer = BoltzTokenizer()
         self.featurizer = BoltzFeaturizer()
@@ -578,6 +807,21 @@ class PredictionDataset(torch.utils.data.Dataset):
         features["record"] = record
         features['structure'] = input_data.structure
         
+        if self.use_template:
+            online_template_featurizer = construct_template_featurizer()
+            # for template feature
+            bioassembly_data = create_bioassembly_data(
+                record = record,
+                template_dir = self.template_dir
+                )        
+            template_features = make_template_feature(
+                input_features = features, 
+                bioassembly = bioassembly_data,
+                use_template = self.use_template,
+                online_template_featurizer = online_template_featurizer,
+                )
+            features.update(template_features)
+        
         return features
 
     def __len__(self) -> int:
@@ -597,6 +841,7 @@ def get_inference_dataloader(
     manifest: Manifest,
     target_dir: Path,
     msa_dir: Path,
+    template_dir: Optional[Path] = None,
     constraints_dir: Optional[Path] = None,
 ) -> DataLoader:
     """Get the inference dataloader.
@@ -611,6 +856,8 @@ def get_inference_dataloader(
         The path to the target directory.
     msa_dir : Path
         The path to the msa directory.
+    template_dir : Optional[Path], optional
+        The path to the template directory, by default None
     constraints_dir : Optional[Path], optional
         The path to the constraints directory, by default None
 
@@ -624,6 +871,8 @@ def get_inference_dataloader(
         manifest=manifest,
         target_dir=target_dir,
         msa_dir=msa_dir,
+        template_dir=template_dir,
+        use_template=args.use_template,
         constraints_dir=constraints_dir,
     )
     

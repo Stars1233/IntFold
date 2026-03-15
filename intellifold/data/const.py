@@ -623,3 +623,663 @@ vdw_radii = [
     2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0
 ]
 # fmt: on
+
+
+
+######## For Template Feature ########
+# Copyright 2024 ByteDance and/or its affiliates.
+# Copyright 2026 IntelliGen-AI and/or its affiliates.
+#
+# This file includes modifications made by IntelliGen-AI.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from collections.abc import Set, Mapping
+from typing import Final
+import numpy as np
+
+# MSA mapping dict for all types
+MSA_PROTEIN_SEQ_TO_ID = {
+    "A": 0,
+    "B": 3,  # Same as D.
+    "C": 4,
+    "D": 3,
+    "E": 6,
+    "F": 13,
+    "G": 7,
+    "H": 8,
+    "I": 9,
+    "J": 20,  # Same as unknown (X).
+    "K": 11,
+    "L": 10,
+    "M": 12,
+    "N": 2,
+    "O": 20,  # Same as unknown (X).
+    "P": 14,
+    "Q": 5,
+    "R": 1,
+    "S": 15,
+    "T": 16,
+    "U": 4,  # Same as C.
+    "V": 19,
+    "W": 17,
+    "X": 20,
+    "Y": 18,
+    "Z": 6,  # Same as E.
+    "-": 31,
+}
+MSA_RNA_SEQ_TO_ID = {
+    # Map non-standard residues to UNK_NUCLEIC (N) -> 25
+    **{chr(i): 25 for i in range(ord("A"), ord("Z") + 1)},
+    # Continue the RNA indices from where Protein indices left off.
+    "-": 31,
+    "A": 21,
+    "G": 22,
+    "C": 23,
+    "U": 24,
+}
+MSA_DNA_SEQ_TO_ID = {
+    # Map non-standard residues to UNK_NUCLEIC (N) -> 30
+    **{chr(i): 30 for i in range(ord("A"), ord("Z") + 1)},
+    # Continue the DNA indices from where DNA indices left off.
+    "-": 31,
+    "A": 26,
+    "G": 27,
+    "C": 28,
+    "T": 29,
+}
+TEMPLATE_PROTEIN_SEQ_TO_ID = MSA_PROTEIN_SEQ_TO_ID
+TEMPLATE_RNA_SEQ_TO_ID = MSA_RNA_SEQ_TO_ID
+TEMPLATE_DNA_SEQ_TO_ID = MSA_DNA_SEQ_TO_ID
+
+PROTEIN_CHAIN: Final[str] = "polypeptide(L)"
+RNA_CHAIN: Final[str] = "polyribonucleotide"
+DNA_CHAIN: Final[str] = "polydeoxyribonucleotide"
+BRANCHED_CHAIN: Final[str] = "branched"
+MACROLIDE_CHAIN: Final[str] = "macrolide"
+NON_POLYMER_CHAIN: Final[str] = "non-polymer"
+LIGAND_CHAIN_TYPES: Final[Set[str]] = {
+    BRANCHED_CHAIN,
+    MACROLIDE_CHAIN,
+    NON_POLYMER_CHAIN,
+}
+
+
+
+# Standard residues (AlphaFold3 SI Talbe 13)
+PRO_STD_RESIDUES = {
+    "ALA": 0,
+    "ARG": 1,
+    "ASN": 2,
+    "ASP": 3,
+    "CYS": 4,
+    "GLN": 5,
+    "GLU": 6,
+    "GLY": 7,
+    "HIS": 8,
+    "ILE": 9,
+    "LEU": 10,
+    "LYS": 11,
+    "MET": 12,
+    "PHE": 13,
+    "PRO": 14,
+    "SER": 15,
+    "THR": 16,
+    "TRP": 17,
+    "TYR": 18,
+    "VAL": 19,
+    "UNK": 20,
+}
+
+RNA_STD_RESIDUES = {
+    "A": 21,
+    "G": 22,
+    "C": 23,
+    "U": 24,
+    "N": 25,
+}
+
+DNA_STD_RESIDUES = {
+    "DA": 26,
+    "DG": 27,
+    "DC": 28,
+    "DT": 29,
+    "DN": 30,
+}
+
+RNA_START_INDEX = 21
+DNA_START_INDEX = 26
+
+GAP = {"-": 31}
+STD_RESIDUES = PRO_STD_RESIDUES | RNA_STD_RESIDUES | DNA_STD_RESIDUES
+STD_RESIDUES_WITH_GAP = STD_RESIDUES | GAP
+STD_RESIDUES_WITH_GAP_ID_TO_NAME = {
+    idx: res_type for res_type, idx in STD_RESIDUES_WITH_GAP.items()
+}
+
+
+PROTEIN_TYPES_ONE_LETTER = (
+    "A",
+    "R",
+    "N",
+    "D",
+    "C",
+    "Q",
+    "E",
+    "G",
+    "H",
+    "I",
+    "L",
+    "K",
+    "M",
+    "F",
+    "P",
+    "S",
+    "T",
+    "W",
+    "Y",
+    "V",
+)
+
+PROTEIN_COMMON_ONE_TO_THREE = {
+    "A": "ALA",
+    "R": "ARG",
+    "N": "ASN",
+    "D": "ASP",
+    "C": "CYS",
+    "Q": "GLN",
+    "E": "GLU",
+    "G": "GLY",
+    "H": "HIS",
+    "I": "ILE",
+    "L": "LEU",
+    "K": "LYS",
+    "M": "MET",
+    "F": "PHE",
+    "P": "PRO",
+    "S": "SER",
+    "T": "THR",
+    "W": "TRP",
+    "Y": "TYR",
+    "V": "VAL",
+}
+
+RNA_TYPES = ("A", "G", "C", "U")
+DNA_TYPES = ("DA", "DG", "DC", "DT")
+
+ATOM14 = {
+    "ALA": ("N", "CA", "C", "O", "CB"),
+    "ARG": ("N", "CA", "C", "O", "CB", "CG", "CD", "NE", "CZ", "NH1", "NH2"),
+    "ASN": ("N", "CA", "C", "O", "CB", "CG", "OD1", "ND2"),
+    "ASP": ("N", "CA", "C", "O", "CB", "CG", "OD1", "OD2"),
+    "CYS": ("N", "CA", "C", "O", "CB", "SG"),
+    "GLN": ("N", "CA", "C", "O", "CB", "CG", "CD", "OE1", "NE2"),
+    "GLU": ("N", "CA", "C", "O", "CB", "CG", "CD", "OE1", "OE2"),
+    "GLY": ("N", "CA", "C", "O"),
+    "HIS": ("N", "CA", "C", "O", "CB", "CG", "ND1", "CD2", "CE1", "NE2"),
+    "ILE": ("N", "CA", "C", "O", "CB", "CG1", "CG2", "CD1"),
+    "LEU": ("N", "CA", "C", "O", "CB", "CG", "CD1", "CD2"),
+    "LYS": ("N", "CA", "C", "O", "CB", "CG", "CD", "CE", "NZ"),
+    "MET": ("N", "CA", "C", "O", "CB", "CG", "SD", "CE"),
+    "PHE": ("N", "CA", "C", "O", "CB", "CG", "CD1", "CD2", "CE1", "CE2", "CZ"),
+    "PRO": ("N", "CA", "C", "O", "CB", "CG", "CD"),
+    "SER": ("N", "CA", "C", "O", "CB", "OG"),
+    "THR": ("N", "CA", "C", "O", "CB", "OG1", "CG2"),
+    "TRP": (
+        "N",
+        "CA",
+        "C",
+        "O",
+        "CB",
+        "CG",
+        "CD1",
+        "CD2",
+        "NE1",
+        "CE2",
+        "CE3",
+        "CZ2",
+        "CZ3",
+        "CH2",
+    ),
+    "TYR": ("N", "CA", "C", "O", "CB", "CG", "CD1", "CD2", "CE1", "CE2", "CZ", "OH"),
+    "VAL": ("N", "CA", "C", "O", "CB", "CG1", "CG2"),
+    "UNK": (),
+}
+
+DENSE_ATOM = {
+    **ATOM14,
+    "A": (
+        "OP3",
+        "P",
+        "OP1",
+        "OP2",
+        "O5'",
+        "C5'",
+        "C4'",
+        "O4'",
+        "C3'",
+        "O3'",
+        "C2'",
+        "O2'",
+        "C1'",
+        "N9",
+        "C8",
+        "N7",
+        "C5",
+        "C6",
+        "N6",
+        "N1",
+        "C2",
+        "N3",
+        "C4",
+    ),
+    "C": (
+        "OP3",
+        "P",
+        "OP1",
+        "OP2",
+        "O5'",
+        "C5'",
+        "C4'",
+        "O4'",
+        "C3'",
+        "O3'",
+        "C2'",
+        "O2'",
+        "C1'",
+        "N1",
+        "C2",
+        "O2",
+        "N3",
+        "C4",
+        "N4",
+        "C5",
+        "C6",
+    ),
+    "G": (
+        "OP3",
+        "P",
+        "OP1",
+        "OP2",
+        "O5'",
+        "C5'",
+        "C4'",
+        "O4'",
+        "C3'",
+        "O3'",
+        "C2'",
+        "O2'",
+        "C1'",
+        "N9",
+        "C8",
+        "N7",
+        "C5",
+        "C6",
+        "O6",
+        "N1",
+        "C2",
+        "N2",
+        "N3",
+        "C4",
+    ),
+    "U": (
+        "OP3",
+        "P",
+        "OP1",
+        "OP2",
+        "O5'",
+        "C5'",
+        "C4'",
+        "O4'",
+        "C3'",
+        "O3'",
+        "C2'",
+        "O2'",
+        "C1'",
+        "N1",
+        "C2",
+        "O2",
+        "N3",
+        "C4",
+        "O4",
+        "C5",
+        "C6",
+    ),
+    "DA": (
+        "OP3",
+        "P",
+        "OP1",
+        "OP2",
+        "O5'",
+        "C5'",
+        "C4'",
+        "O4'",
+        "C3'",
+        "O3'",
+        "C2'",
+        "C1'",
+        "N9",
+        "C8",
+        "N7",
+        "C5",
+        "C6",
+        "N6",
+        "N1",
+        "C2",
+        "N3",
+        "C4",
+    ),
+    "DC": (
+        "OP3",
+        "P",
+        "OP1",
+        "OP2",
+        "O5'",
+        "C5'",
+        "C4'",
+        "O4'",
+        "C3'",
+        "O3'",
+        "C2'",
+        "C1'",
+        "N1",
+        "C2",
+        "O2",
+        "N3",
+        "C4",
+        "N4",
+        "C5",
+        "C6",
+    ),
+    "DG": (
+        "OP3",
+        "P",
+        "OP1",
+        "OP2",
+        "O5'",
+        "C5'",
+        "C4'",
+        "O4'",
+        "C3'",
+        "O3'",
+        "C2'",
+        "C1'",
+        "N9",
+        "C8",
+        "N7",
+        "C5",
+        "C6",
+        "O6",
+        "N1",
+        "C2",
+        "N2",
+        "N3",
+        "C4",
+    ),
+    "DT": (
+        "OP3",
+        "P",
+        "OP1",
+        "OP2",
+        "O5'",
+        "C5'",
+        "C4'",
+        "O4'",
+        "C3'",
+        "O3'",
+        "C2'",
+        "C1'",
+        "N1",
+        "C2",
+        "O2",
+        "N3",
+        "C4",
+        "O4",
+        "C5",
+        "C7",
+        "C6",
+    ),
+}
+
+ATOM14_PADDED = {k: list(v) + [""] * (14 - len(v)) for k, v in ATOM14.items()}
+
+ATOM37 = (
+    "N",
+    "CA",
+    "C",
+    "CB",
+    "O",
+    "CG",
+    "CG1",
+    "CG2",
+    "OG",
+    "OG1",
+    "SG",
+    "CD",
+    "CD1",
+    "CD2",
+    "ND1",
+    "ND2",
+    "OD1",
+    "OD2",
+    "SD",
+    "CE",
+    "CE1",
+    "CE2",
+    "CE3",
+    "NE",
+    "NE1",
+    "NE2",
+    "OE1",
+    "OE2",
+    "CH2",
+    "NH1",
+    "NH2",
+    "OH",
+    "CZ",
+    "CZ2",
+    "CZ3",
+    "NZ",
+    "OXT",
+)
+ATOM37_ORDER = {name: i for i, name in enumerate(ATOM37)}
+ATOM37_NUM = len(ATOM37)  # := 37.
+
+_CHI_ANGLES_MASK = (
+    (0.0, 0.0, 0.0, 0.0),
+    (1.0, 1.0, 1.0, 1.0),
+    (1.0, 1.0, 0.0, 0.0),
+    (1.0, 1.0, 0.0, 0.0),
+    (1.0, 0.0, 0.0, 0.0),
+    (1.0, 1.0, 1.0, 0.0),
+    (1.0, 1.0, 1.0, 0.0),
+    (0.0, 0.0, 0.0, 0.0),
+    (1.0, 1.0, 0.0, 0.0),
+    (1.0, 1.0, 0.0, 0.0),
+    (1.0, 1.0, 0.0, 0.0),
+    (1.0, 1.0, 1.0, 1.0),
+    (1.0, 1.0, 1.0, 0.0),
+    (1.0, 1.0, 0.0, 0.0),
+    (1.0, 1.0, 0.0, 0.0),
+    (1.0, 0.0, 0.0, 0.0),
+    (1.0, 0.0, 0.0, 0.0),
+    (1.0, 1.0, 0.0, 0.0),
+    (1.0, 1.0, 0.0, 0.0),
+    (1.0, 0.0, 0.0, 0.0),
+)
+
+_CHI_ANGLES_ATOMS = {
+    "ALA": [],
+    "ARG": [
+        ("N", "CA", "CB", "CG"),
+        ("CA", "CB", "CG", "CD"),
+        ("CB", "CG", "CD", "NE"),
+        ("CG", "CD", "NE", "CZ"),
+    ],
+    "ASN": [("N", "CA", "CB", "CG"), ("CA", "CB", "CG", "OD1")],
+    "ASP": [("N", "CA", "CB", "CG"), ("CA", "CB", "CG", "OD1")],
+    "CYS": [("N", "CA", "CB", "SG")],
+    "GLN": [
+        ("N", "CA", "CB", "CG"),
+        ("CA", "CB", "CG", "CD"),
+        ("CB", "CG", "CD", "OE1"),
+    ],
+    "GLU": [
+        ("N", "CA", "CB", "CG"),
+        ("CA", "CB", "CG", "CD"),
+        ("CB", "CG", "CD", "OE1"),
+    ],
+    "GLY": [],
+    "HIS": [("N", "CA", "CB", "CG"), ("CA", "CB", "CG", "ND1")],
+    "ILE": [("N", "CA", "CB", "CG1"), ("CA", "CB", "CG1", "CD1")],
+    "LEU": [("N", "CA", "CB", "CG"), ("CA", "CB", "CG", "CD1")],
+    "LYS": [
+        ("N", "CA", "CB", "CG"),
+        ("CA", "CB", "CG", "CD"),
+        ("CB", "CG", "CD", "CE"),
+        ("CG", "CD", "CE", "NZ"),
+    ],
+    "MET": [
+        ("N", "CA", "CB", "CG"),
+        ("CA", "CB", "CG", "SD"),
+        ("CB", "CG", "SD", "CE"),
+    ],
+    "PHE": [("N", "CA", "CB", "CG"), ("CA", "CB", "CG", "CD1")],
+    "PRO": [("N", "CA", "CB", "CG"), ("CA", "CB", "CG", "CD")],
+    "SER": [("N", "CA", "CB", "OG")],
+    "THR": [("N", "CA", "CB", "OG1")],
+    "TRP": [("N", "CA", "CB", "CG"), ("CA", "CB", "CG", "CD1")],
+    "TYR": [("N", "CA", "CB", "CG"), ("CA", "CB", "CG", "CD1")],
+    "VAL": [("N", "CA", "CB", "CG1")],
+}
+
+
+def _make_restype_rigidgroup_dense_atom_idx():
+    """Create Mapping from rigid_groups to dense_atom indices."""
+    num_restypes_with_unk_and_gap = len(STD_RESIDUES_WITH_GAP)
+    # Create an array with the atom names.
+    # shape (num_restypes, num_rigidgroups, 3_atoms):
+    # (32, 8, 3)
+    base_atom_indices = np.zeros((num_restypes_with_unk_and_gap, 8, 3), dtype=np.int32)
+    # Protein: 0 - 19
+    # 4,5,6,7: 'chi1,2,3,4-group'
+    for restype, restype_letter in enumerate(PROTEIN_TYPES_ONE_LETTER):
+        resname = PROTEIN_COMMON_ONE_TO_THREE[restype_letter]
+
+        dense_atom_names = ATOM14[resname]
+        # 0: backbone frame
+        base_atom_indices[restype, 0, :] = [
+            dense_atom_names.index(atom) for atom in ["C", "CA", "N"]
+        ]
+
+        # 3: 'psi-group'
+        base_atom_indices[restype, 3, :] = [
+            dense_atom_names.index(atom) for atom in ["CA", "C", "O"]
+        ]
+        for chi_idx in range(4):
+            if _CHI_ANGLES_MASK[restype][chi_idx]:
+                atom_names = _CHI_ANGLES_ATOMS[resname][chi_idx]
+                base_atom_indices[restype, chi_idx + 4, :] = [
+                    dense_atom_names.index(atom) for atom in atom_names[1:]
+                ]
+    dense_atom_names = DENSE_ATOM["A"]
+    nucleic_rigid_atoms = [
+        dense_atom_names.index(atom) for atom in ["C1'", "C3'", "C4'"]
+    ]
+
+    # RNA: 21-24
+    for nanum, _ in enumerate(RNA_TYPES):
+        # 0: backbone frame only.
+        # we have aa + unk + gap, so we want to start after those
+        resnum = nanum + RNA_START_INDEX
+        base_atom_indices[resnum, 0, :] = nucleic_rigid_atoms
+
+    # DNA: 26-30
+    for nanum, _ in enumerate(DNA_TYPES):
+        # 0: backbone frame only.
+        # we have aa + unk + gap, so we want to start after those
+        resnum = nanum + DNA_START_INDEX
+        base_atom_indices[resnum, 0, :] = nucleic_rigid_atoms
+
+    return base_atom_indices
+
+
+# Mapping from rigid_groups to dense_atom indices.
+# shape (num_restypes, num_rigidgroups, 3_atoms): (32, 8, 3)
+RESTYPE_RIGIDGROUP_DENSE_ATOM_IDX = _make_restype_rigidgroup_dense_atom_idx()
+
+
+def _make_restype_pseudobeta_idx():
+    """Returns indices of residue's pseudo-beta."""
+    num_restypes_with_unk_and_gap = len(STD_RESIDUES_WITH_GAP)
+    restype_pseudobeta_index = np.zeros(
+        (num_restypes_with_unk_and_gap,), dtype=np.int32
+    )
+    for restype, restype_letter in enumerate(PROTEIN_TYPES_ONE_LETTER):
+        restype_name = PROTEIN_COMMON_ONE_TO_THREE[restype_letter]
+        atom_names = list(ATOM14[restype_name])
+        if restype_name in {"GLY"}:
+            restype_pseudobeta_index[restype] = atom_names.index("CA")
+        else:
+            restype_pseudobeta_index[restype] = atom_names.index("CB")
+    for nanum, resname in enumerate(RNA_TYPES):
+        atom_names = list(DENSE_ATOM[resname])
+        # 0: backbone frame only.
+        # we have aa + unk , so we want to start after those
+        restype = nanum + RNA_START_INDEX
+        if resname in {"A", "G"}:
+            restype_pseudobeta_index[restype] = atom_names.index("C4")
+        else:
+            restype_pseudobeta_index[restype] = atom_names.index("C2")
+
+    for nanum, resname in enumerate(DNA_TYPES):
+        atom_names = list(DENSE_ATOM[resname])
+        # 0: backbone frame only.
+        # we have aa + unk , so we want to start after those
+        restype = nanum + DNA_START_INDEX
+        if resname in {"DA", "DG"}:
+            restype_pseudobeta_index[restype] = atom_names.index("C4")
+        else:
+            restype_pseudobeta_index[restype] = atom_names.index("C2")
+    return restype_pseudobeta_index
+
+
+# Returns indices of residue's pseudo-beta.
+RESTYPE_PSEUDOBETA_INDEX = _make_restype_pseudobeta_idx()
+
+
+def _make_aatype_dense_atom_to_atom37():
+    """Map from dense_atom to atom37 per residue type."""
+    num_dense = max(len(v) for v in DENSE_ATOM.values())
+    restype_dense_atom_to_atom37 = []  # mapping (restype, dense_atom) --> atom37
+    for rt in PROTEIN_TYPES_ONE_LETTER:
+        atom_names = ATOM14_PADDED[PROTEIN_COMMON_ONE_TO_THREE[rt]]
+        # Extend to num_dense
+        extended_atom_names = list(atom_names) + [""] * (num_dense - len(atom_names))
+        restype_dense_atom_to_atom37.append(
+            [(ATOM37_ORDER[name] if name else 0) for name in extended_atom_names]
+        )
+    # Add dummy mapping for restype 'UNK', and nucleics [N and DN], '-' (gap).
+    for _ in range(2 + len(RNA_STD_RESIDUES) + len(DNA_STD_RESIDUES)):
+        restype_dense_atom_to_atom37.append([0] * num_dense)
+
+    restype_dense_atom_to_atom37 = np.array(
+        restype_dense_atom_to_atom37, dtype=np.int32
+    )
+    return restype_dense_atom_to_atom37
+
+
+# Mapping from dense_atom to atom37 per residue type.
+# Used for template processing.
+PROTEIN_AATYPE_DENSE_ATOM_TO_ATOM37 = _make_aatype_dense_atom_to_atom37()
+

@@ -51,7 +51,6 @@ To more complete installation instructions and usage, please refer to the [Insta
 ## 🔍 Inference
 
 1. **Prepare Input File**: Create a YAML file with your sequences following our [input format specification](docs/input_yaml_format.md)
-      > **Note**: **Our model natively supports template inputs**, but this repo’s inference pipeline (adapted from Boltz-1) does not currently include template processing. Predictions therefore run **without templates**, which may slightly reduce performance.
 
 2. **Run Prediction**:
    ```bash
@@ -104,6 +103,7 @@ If you use IntelliFold in your research, please cite our paper:
 - The implementation of **fast layernorm operators** is inspired by [OneFlow](https://github.com/Oneflow-Inc/oneflow) and [FastFold](https://github.com/hpcaitech/FastFold), following [Protenix](https://github.com/bytedance/Protenix)'s usage. 
 - Many components in `intellifold/openfold/` are adapted from [OpenFold](https://github.com/aqlaboratory/openfold), with substantial modifications and improvements by our team (except for the `LayerNorm` part).  
 - This repository, the implementation of **Inference Data Pipeline**(Data/Feature Processing and MSA generation tasks) referred to [Boltz-1](https://github.com/jwohlwend/boltz), and modify some codes to adapt to the input of our model.
+  - The **template pipeline** implementation in the **Inference Data Pipeline** of this repository refers to [Protenix](https://github.com/bytedance/Protenix), with additional adjustments and modifications to fit our model.
 
 
 

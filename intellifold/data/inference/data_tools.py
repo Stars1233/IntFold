@@ -24,6 +24,7 @@ import subprocess
 import shutil
 import pickle
 import logging
+import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
 from intellifold.data import const
@@ -31,8 +32,9 @@ from intellifold.data.types import MSA, Manifest, Record
 from intellifold.data.msa.mmseqs2 import run_mmseqs2
 from intellifold.data.parse.a3m import parse_a3m
 from intellifold.data.parse.csv import parse_csv
-from intellifold.data.parse.fasta import parse_fasta
 from intellifold.data.parse.yaml import parse_yaml
+from runner.run_templates_search import run_template_search
+
 
 logger = logging.getLogger(__name__)
 
@@ -62,20 +64,20 @@ def check_inputs(
 
     # Check if data is a directory
     if data.is_dir():
-        ### only for .fa, .fas, .fasta, .yml, .yaml file types
-        data = list(data.glob("*.fa")) + list(data.glob("*.fas")) + list(data.glob("*.fasta")) + list(data.glob("*.yml")) + list(data.glob("*.yaml"))
+        ### only for .yml, .yaml file types
+        data = list(data.glob("*.yml")) + list(data.glob("*.yaml"))
     
     else:
         # Check if data is a file
         if not data.exists():
             msg = f"Input data {data} does not exist."
             raise FileNotFoundError(msg)            
-        if data.suffix in (".fa", ".fas", ".fasta") or data.suffix in (".yml", ".yaml"):
+        if data.suffix in (".yml", ".yaml"):
             data = [data]
         else:
             msg = (
                 f"Unable to parse filetype {data.suffix}, "
-                "please provide a .fasta or .yaml file."
+                "please provide a .yaml file."
             )
             raise RuntimeError(msg)
                 
@@ -131,11 +133,13 @@ def check_outputs(
 
 def compute_msa(
     data: dict[str, str],
+    generate_template: dict[str, bool],
     target_id: str,
     msa_dir: Path,
     msa_server_url: str,
     msa_pairing_strategy: str,
     use_pairing=True,
+    use_template=False,
 ) -> None:
     """Compute the MSA for the input data.
 
@@ -143,6 +147,8 @@ def compute_msa(
     ----------
     data : dict[str, str]
         The input protein sequences.
+    generate_template : dict[str, bool]
+        Whether to generate template for each sequence.
     target_id : str
         The target id.
     msa_dir : Path
@@ -186,8 +192,13 @@ def compute_msa(
 
         # Combine paired-unpaired sequences
         unpaired = unpaired_msa[idx].strip().splitlines()
+        ### save unpaired sequences to a3m format
+        a3m_msa_path = msa_dir / f"{name}_unpaired.a3m"
+        with a3m_msa_path.open("w") as f:
+            f.write(unpaired_msa[idx])
         unpaired = unpaired[1::2]
         unpaired = unpaired[: (const.max_msa_seqs - len(paired))]
+        
         if paired:
             unpaired = unpaired[1:]  # ignore query is already present
 
@@ -201,6 +212,15 @@ def compute_msa(
         msa_path = msa_dir / f"{name}.csv"
         with msa_path.open("w") as f:
             f.write("\n".join(csv_str))
+            
+        ## run templates search for hmmsearch.a3m
+        if use_template:
+            if generate_template[name]:
+                hmmsearch_a3m_path = msa_dir / f"{name}_hmmsearch.a3m"
+                run_template_search(
+                    msa_a3m_path_for_template_search = str(a3m_msa_path),
+                    hmmsearch_a3m_save_path = str(hmmsearch_a3m_path)
+                )
 
 
 def parse_m8(
@@ -328,6 +348,7 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
     max_msa_seqs: int = 4096,
     use_msa_server: bool = False,
     use_pairing: bool = True,
+    use_template: bool = False,
 ) -> None:
     """Process the input data and output directory.
 
@@ -343,6 +364,8 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
         Max number of MSA sequences, by default 4096.
     use_msa_server : bool, optional
         Whether to use the MMSeqs2 server for MSA generation, by default False.
+    use_template : bool, optional
+        Whether to use Protein templates for prediction, by default False.
 
     Returns
     -------
@@ -385,14 +408,18 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
     msa_dir = out_dir / "msa"
     structure_dir = out_dir / "processed" / "structures"
     processed_msa_dir = out_dir / "processed" / "msa"
+    processed_template_dir = out_dir / "processed" / "templates"
     processed_constraints_dir = out_dir / "processed" / "constraints"
     processed_polymer_fasta_dir = out_dir / "processed" / "fastas"
     predictions_dir = out_dir / "predictions"
+    temp_dir = out_dir / "temp"
 
     out_dir.mkdir(parents=True, exist_ok=True)
     msa_dir.mkdir(parents=True, exist_ok=True)
     structure_dir.mkdir(parents=True, exist_ok=True)
     processed_msa_dir.mkdir(parents=True, exist_ok=True)
+    processed_template_dir.mkdir(parents=True, exist_ok=True)
+    temp_dir.mkdir(parents=True, exist_ok=True)
     # processed_constraints_dir.mkdir(parents=True, exist_ok=True)   ### TODO: will be used in the future
     if args.return_similar_seq:
         check_mmseqs2()
@@ -415,24 +442,21 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
     for path in tqdm(data, desc=f"Data Preprocessing"):
         try:
             # Parse data
-            if path.suffix in (".fa", ".fas", ".fasta"):
-                target = parse_fasta(path, ccd)
-            elif path.suffix in (".yml", ".yaml"):
+            if path.suffix in (".yml", ".yaml"):
                 target = parse_yaml(path, ccd)
             elif path.is_dir():
-                msg = f"Found directory {path} instead of .fasta or .yaml, skipping."
+                msg = f"Found directory {path} instead of .yaml, skipping."
                 raise RuntimeError(msg)
             else:
                 msg = (
                     f"Unable to parse filetype {path.suffix}, "
-                    "please provide a .fasta or .yaml file."
+                    "please provide a .yaml file."
                 )
                 raise RuntimeError(msg)
 
             # Get target id
             target_id = target.record.id
-            # breakpoint()
-            
+
             #### save each polymer chain seqs
             if args.return_similar_seq:
                 prot_id = const.chain_type_ids["PROTEIN"]
@@ -457,18 +481,43 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
 
             # Get all MSA ids and decide whether to generate MSA
             to_generate = {}
+            generate_template = {}
+            to_generate_template = {}
             prot_id = const.chain_type_ids["PROTEIN"]
             for chain in target.record.chains:
                 # Add to generate list, assigning entity id
-                if (chain.mol_type == prot_id) and (chain.msa_id == 0):
-                    entity_id = chain.entity_id
-                    msa_id = f"{target_id}_{entity_id}"
-                    to_generate[msa_id] = target.sequences[entity_id]
-                    chain.msa_id = msa_dir / f"{msa_id}.csv"
-
+                # if (chain.mol_type == prot_id) and (chain.msa_id == 0):
+                if chain.mol_type == prot_id:
+                    ### MSA And template will only be generated for protein chains without MSA/template provided in the input yaml
+                    if chain.msa_id == 0 and chain.template_id == 0:
+                        entity_id = chain.entity_id
+                        msa_id = f"{target_id}_{entity_id}"
+                        to_generate[msa_id] = target.sequences[entity_id]
+                        generate_template[msa_id] = False
+                        chain.msa_id = msa_dir / f"{msa_id}.csv"
+                        if use_template:
+                            chain.template_id = msa_dir / f"{msa_id}_hmmsearch.a3m"
+                            generate_template[msa_id] = True
+                    ## If MSA provided but no template provided, will generate template based on the MSA if use_template is True
+                    elif chain.msa_id != 0 and chain.template_id == 0:
+                        if use_template:
+                            msa_id = chain.msa_id
+                            entity_id = chain.entity_id
+                            template_id = temp_dir / f"{target_id}_{entity_id}_hmmsearch.a3m"
+                            chain.template_id = template_id
+                            to_generate_template[entity_id] = msa_id
+                    ## If no MSA provided but template provided, we will only generate MSA, and use template provided in the input yaml
+                    elif chain.msa_id == 0 and chain.template_id != 0:
+                        entity_id = chain.entity_id
+                        msa_id = f"{target_id}_{entity_id}"
+                        to_generate[msa_id] = target.sequences[entity_id]
+                        generate_template[msa_id] = False
+                        chain.msa_id = msa_dir / f"{msa_id}.csv"
+ 
                 # We do not support msa generation for non-protein chains
                 elif chain.msa_id == 0:
                     chain.msa_id = -1
+                    chain.template_id = -1
 
             # Generate MSA
             if to_generate and not use_msa_server:
@@ -480,15 +529,30 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
                 logger.info(msg)
                 compute_msa(
                     data=to_generate,
+                    generate_template=generate_template,
                     target_id=target_id,
                     msa_dir=msa_dir,
                     msa_server_url=msa_server_url,
                     msa_pairing_strategy=msa_pairing_strategy,
                     use_pairing=use_pairing,
+                    use_template=use_template,
                 )
-
+                
+            if to_generate_template and use_template:
+                msg = f"Generating templates for {path} with {len(to_generate_template)} protein entities based on provided MSA."
+                logger.info(msg)
+                for entity_id, msa_id in to_generate_template.items():
+                    msa_a3m_path_for_template_search = msa_id
+                    temp_msa_a3m_path_for_template_search = temp_dir / f"{target_id}_{entity_id}_for_template_search.a3m"
+                    reother_msa(input_msa_path=msa_a3m_path_for_template_search, output_msa_path=temp_msa_a3m_path_for_template_search)
+                    hmmsearch_a3m_save_path = temp_dir / f"{target_id}_{entity_id}_hmmsearch.a3m"
+                    run_template_search(
+                        msa_a3m_path_for_template_search=str(temp_msa_a3m_path_for_template_search),
+                        hmmsearch_a3m_save_path=str(hmmsearch_a3m_save_path)
+                    )
             # Parse MSA data
             msas = sorted({c.msa_id for c in target.record.chains if c.msa_id != -1})
+            templates = sorted({c.template_id for c in target.record.chains if c.template_id != -1})
             msa_id_map = {}
             for msa_idx, msa_id in enumerate(msas):
                 # Check that raw MSA exists
@@ -515,12 +579,19 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
                         raise RuntimeError(msg)
 
                     msa.dump(processed)
-
+                ## move the hmmsearch a3m to processed msa dir for template search
+                if use_template:
+                    template_id = templates[msa_idx]
+                    template_path = Path(template_id)
+                    template_idx = msa_idx
+                    processed = processed_template_dir / f"{target_id}_{template_idx}_hmmsearch.a3m"
+                    shutil.copy(template_path, processed)
             # Modify records to point to processed MSA
             for c in target.record.chains:
                 if (c.msa_id != -1) and (c.msa_id in msa_id_map):
                     c.msa_id = msa_id_map[c.msa_id]
-
+                    if use_template and c.template_id != -1:
+                        c.template_id = c.msa_id
             # Keep record
             records.append(target.record)
 
@@ -544,6 +615,10 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
     manifest = Manifest(records)
     manifest.dump(out_dir / "processed" / "manifest.json")
     
+    # remove the temporary directory
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir)
+        
     if args.return_similar_seq:
         if len(protein_seqs) > 0:
             output_path = processed_polymer_fasta_dir / "protein.fasta"
@@ -553,3 +628,54 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
             output_path = processed_polymer_fasta_dir / "nucleotide.fasta"
             with output_path.open("w") as f:
                 f.write('\n'.join(nucleotide_seqs))
+                
+                
+def reother_msa(input_msa_path, output_msa_path):
+    """
+    Reorder the MSA file to put Uniref sequences at the top, which can help the template search to find better templates.
+    Parameters    ----------
+    input_msa_path : str
+        The path to the input MSA file, which can be in a3m or csv format.
+    output_msa_path : str
+        The path to the output MSA file, which will be in a3m format.
+    """
+    if not (input_msa_path.endswith(".a3m") or input_msa_path.endswith(".csv")):
+        raise AssertionError(
+            f"input msa {input_msa_path} should be in a3m or csv format"
+        )
+    
+    if input_msa_path.endswith(".a3m"):
+        with open(input_msa_path, "r") as f:
+            msa_a3m = f.read().strip()
+        ## extract Uniref MSA from the a3m file, which is in the format of >seq_id\nsequence\n
+        msa_lines = msa_a3m.split("\n")
+        uniref_msa_lines = []
+        other_msa_lines = []
+        uniref_msa_lines.append(msa_lines[0])  # add the query sequence at the top
+        uniref_msa_lines.append(msa_lines[1])
+        for i in range(2, len(msa_lines), 2):
+            desc = msa_lines[i]
+            seq = msa_lines[i+1]
+            if desc.lower().startswith(">uniref"):
+                uniref_msa_lines.append(desc)
+                uniref_msa_lines.append(seq)
+            else:
+                other_msa_lines.append(desc)
+                other_msa_lines.append(seq)
+        msa_a3m = "\n".join(uniref_msa_lines + other_msa_lines)
+    else:
+        msa_df = pd.read_csv(input_msa_path)
+        msa_df = msa_df[msa_df['key'] == -1]
+        msa_lines = []
+        index = 0
+        for _, row in enumerate(msa_df.iterrows()):
+            sequence = row['sequence']
+            msa_lines.append(f">{index}")
+            msa_lines.append(sequence)
+            index += 1
+        msa_a3m = "\n".join(msa_lines)
+            
+    msa_a3m = msa_a3m.strip()
+    with open(output_msa_path, "w") as f:
+        f.write(msa_a3m)
+        

@@ -9,6 +9,8 @@ channels:
 dependencies:
   - python=3.11
   - mmseqs2=13.45111=h95f258a_1
+  - hmmer
+  - kalign2
   - pip
   - pip:
       - rdkit==2024.3.2

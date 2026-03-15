@@ -171,6 +171,7 @@ def main(args):
     # Set cache path
     cache = Path(args.cache).expanduser()
     cache.mkdir(parents=True, exist_ok=True)
+    os.environ["INTELLIFOLD_CACHE"] = str(cache)
 
     # Create output directories
     data = Path(args.data).expanduser()
@@ -180,7 +181,11 @@ def main(args):
     
     if accelerator.is_main_process:
         # Download necessary data and model
-        download(cache, args.model)
+        download(
+            cache, 
+            args.model, 
+            use_template=args.use_template
+            )
 
     if accelerator.is_main_process:
         # Validate inputs
@@ -193,7 +198,8 @@ def main(args):
         logger.info(msg)
 
     # Process inputs
-    ccd_path = cache / "ccd.pkl"
+    ccd_path = cache / "ccd_v2.pkl"
+    
 
     if accelerator.is_main_process:
         process_inputs(
@@ -206,6 +212,7 @@ def main(args):
             msa_pairing_strategy=args.msa_pairing_strategy,
             max_msa_seqs=16384,
             use_pairing=not args.no_pairing,
+            use_template=args.use_template,
         )
         if args.return_similar_seq:
             compute_similar_sequence(
@@ -221,6 +228,7 @@ def main(args):
         manifest=Manifest.load(processed_dir / "manifest.json"),
         targets_dir=processed_dir / "structures",
         msa_dir=processed_dir / "msa",
+        template_dir=(processed_dir / "templates") if args.use_template else None,
         constraints_dir=(processed_dir / "constraints")
         if (processed_dir / "constraints").exists()
         else None,
@@ -241,6 +249,7 @@ def main(args):
         manifest=processed.manifest,
         target_dir=processed.targets_dir,
         msa_dir=processed.msa_dir,
+        template_dir=processed.template_dir if args.use_template else None,
         constraints_dir=processed.constraints_dir,
     )
     
@@ -299,8 +308,15 @@ def main(args):
             ### reference features woulb be changed in the forward pass, keep the original ones
             ref_keys = [key for key in input_features.keys() if 'ref_' in key]
             original_ref_features = [input_features[key] for key in ref_keys]
-                        
-            input_features.update(construct_empty_template_features(input_features, device=accelerator.device))
+                     
+            if args.use_template:
+                orig_template_aatype = input_features['template_aatype']
+                input_features['template_aatype'] = F.one_hot(input_features['template_aatype'].long(),num_classes=31).float()
+                del orig_template_aatype
+                gc.collect()
+                torch.cuda.empty_cache()
+            else:   
+                input_features.update(construct_empty_template_features(input_features, device=accelerator.device))
             
         except Exception as e:
             error_msg = f"Error in prediction: {e}{traceback.format_exc()}\n"
@@ -416,7 +432,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--num_workers', 
         type=int, 
-        default=4, 
+        default=8, 
         help="Number of workers for data loading"
     )
     
@@ -485,6 +501,11 @@ if __name__ == "__main__":
         "--no_pairing",
         action="store_true",
         help="Whether to use pairing for Protein Multimer MSA generation. Default is False.",
+    )
+    parser.add_argument(
+        "--use_template",
+        action="store_true",
+        help="Whether to use Protein templates for prediction. Default is False.",
     )
     parser.add_argument(
         "--only_run_data_process",

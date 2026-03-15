@@ -32,6 +32,7 @@ class BoltzProcessedInput:
     manifest: Manifest
     targets_dir: Path
     msa_dir: Path
+    template_dir: Optional[Path] = None
     constraints_dir: Optional[Path] = None
 
 @dataclass

@@ -206,6 +206,11 @@ Implementation of the `LayerNorm` operators (in intellifold/openfold/utils/layer
 Many components in `intellifold/openfold/` are adapted from [OpenFold](https://github.com/aqlaboratory/openfold), with substantial modifications and improvements by our team (except for the `LayerNorm` part).  
 OneFlow, FastFold, and OpenFold are all licensed under the Apache License 2.0.
 
+The template pipeline implementation in the inference data pipeline is adapted from
+[Protenix](https://github.com/bytedance/Protenix), with additional adjustments and modifications
+to fit our model.
+Protenix is licensed under the Apache License 2.0.
+
 The inference data pipeline in `intellifold/data/` is adapted from [Boltz-1](https://github.com/jwohlwend/boltz).
 Boltz-1 is licensed under the MIT License.  
 The MIT License and copyright notice are included below.

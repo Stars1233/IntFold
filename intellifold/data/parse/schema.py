@@ -748,7 +748,7 @@ def parse_polymer(
 
         atom_center = const.res_to_center_atom_id[res_corrected]
         atom_disto = const.res_to_disto_atom_id[res_corrected]
-        # print(res_corrected, const.token_ids[res_corrected], const.mapping_boltz_token_ids_to_our_token_ids[const.token_ids[res_corrected]])
+        
         parsed.append(
             ParsedResidue(
                 name=res_corrected,
@@ -845,6 +845,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     blocker = rdBase.BlockLogs()  # noqa: F841
 
     # First group items that have the same type, sequence and modifications
+    chain_to_sequence: dict[str, str] = {}
     items_to_group = {}
     for item in schema["sequences"]:
         # Get entity type
@@ -856,6 +857,11 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         # Get sequence
         if entity_type in {"protein", "dna", "rna"}:
             seq = str(item[entity_type]["sequence"])
+            if isinstance(item[entity_type]["id"], list):
+                for id in item[entity_type]["id"]:
+                    chain_to_sequence[id] = seq
+            else:
+                chain_to_sequence[item[entity_type]["id"]] = seq
         elif entity_type == "ligand":
             assert "smiles" in item[entity_type] or "ccd" in item[entity_type]
             assert "smiles" not in item[entity_type] or "ccd" not in item[entity_type]
@@ -863,11 +869,17 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 seq = str(item[entity_type]["smiles"])
             else:
                 seq = str(item[entity_type]["ccd"])
+            if isinstance(item[entity_type]["id"], list):
+                for id in item[entity_type]["id"]:
+                    chain_to_sequence[id] = seq
+            else:
+                chain_to_sequence[item[entity_type]["id"]] = seq
         items_to_group.setdefault((entity_type, seq), []).append(item)
 
     # Go through entities and parse them
     chains: dict[str, ParsedChain] = {}
     chain_to_msa: dict[str, str] = {}
+    chain_to_template: dict[str, str] = {}
     entity_to_seq: dict[str, str] = {}
     is_msa_custom = False
     is_msa_auto = False
@@ -877,11 +889,15 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
 
         # Ensure all the items share the same msa
         msa = -1
+        template = -1
         if entity_type == "protein":
             # Get the msa, default to 0, meaning auto-generated
             msa = items[0][entity_type].get("msa", 0)
             if (msa is None) or (msa == ""):
                 msa = 0
+            template = items[0][entity_type].get("template", 0)
+            if (template is None) or (template == ""):
+                template = 0
 
             # Check if all MSAs are the same within the same entity
             for item in items:
@@ -1036,6 +1052,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             for chain_name in ids:
                 chains[chain_name] = parsed_chain
                 chain_to_msa[chain_name] = msa
+                chain_to_template[chain_name] = template
 
     # Check if msa is custom or auto
     if is_msa_custom and is_msa_auto:
@@ -1052,6 +1069,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     bond_data = []
     res_data = []
     chain_data = []
+    chain_sequence_data = []
 
     rdkit_bounds_constraint_data = []
     chiral_atom_constraint_data = []
@@ -1092,6 +1110,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 chain.cyclic_period,
             )
         )
+        chain_sequence_data.append(chain_to_sequence[chain_name])
         chain_to_idx[chain_name] = asym_id
         sym_count[entity_id] = sym_id + 1
 
@@ -1312,6 +1331,8 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             num_residues=int(chain["res_num"]),
             valid=True,
             entity_id=int(chain["entity_id"]),
+            template_id=chain_to_template[chain["name"]],
+            sequence=chain_to_sequence[chain["name"]],
         )
         chain_infos.append(chain_info)
 
